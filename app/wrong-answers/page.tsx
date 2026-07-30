@@ -1,474 +1,854 @@
-import Link from "next/link";
+"use client";
 
-type WrongAnswerItem = {
-  id: number;
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import { supabase } from "@/lib/supabase";
+
+type WrongAnswer = {
+  id: string;
+  subject_name: string;
   question: string;
-  subject: string;
-  week: string;
-  material: string;
-  selectedAnswer: string;
-  correctAnswer: string;
+  wrong_answer: string;
+  correct_answer: string;
   explanation: string;
-  mistakeType: "개념 부족" | "헷갈림" | "단순 실수";
-  reviewCount: number;
-  mastered: boolean;
+  difficulty: string;
+  is_mastered: boolean;
+  created_at: string;
 };
 
-const wrongAnswers: WrongAnswerItem[] = [
-  {
-    id: 1,
-    question:
-      "충칭 모델과 광둥 모델의 가장 큰 차이로 적절한 것은?",
-    subject: "개발경제학",
-    week: "1주차",
-    material: "충칭 vs 광둥 개발 모델.pdf",
-    selectedAnswer:
-      "충칭 모델은 시장 개방을 중심으로 하고 광둥 모델은 국가 주도 개발을 중심으로 한다.",
-    correctAnswer:
-      "충칭 모델은 국가 주도와 공공성을 강조하고, 광둥 모델은 시장 중심과 대외 개방을 강조한다.",
-    explanation:
-      "충칭 모델은 국유기업과 공공주택, 사회정책을 강조하는 국가 주도형 모델이고, 광둥 모델은 수출·시장 중심의 성장 전략을 강조합니다.",
-    mistakeType: "개념 부족",
-    reviewCount: 1,
-    mastered: false,
-  },
-  {
-    id: 2,
-    question:
-      "Lewis 모형에서 전통 부문에 잉여노동이 존재할 때 나타나는 현상은?",
-    subject: "개발경제학",
-    week: "2주차",
-    material: "Lewis 잉여노동 모형 강의자료.pdf",
-    selectedAnswer:
-      "노동자가 이동할수록 전통 부문의 생산량이 급격히 감소한다.",
-    correctAnswer:
-      "일정 수준까지 노동자가 이동해도 전통 부문의 총생산이 크게 감소하지 않는다.",
-    explanation:
-      "잉여노동이 존재하면 일부 노동자가 현대 부문으로 이동해도 전통 부문의 한계생산이 매우 낮기 때문에 총생산이 크게 줄지 않습니다.",
-    mistakeType: "헷갈림",
-    reviewCount: 2,
-    mastered: false,
-  },
-  {
-    id: 3,
-    question:
-      "공적개발원조의 기본 목적에 가장 가까운 것은?",
-    subject: "국제개발협력",
-    week: "3주차",
-    material: "국제개발협력 발표 자료.pptx",
-    selectedAnswer:
-      "공여국 기업의 해외 진출 확대",
-    correctAnswer:
-      "개발도상국의 경제·사회 발전과 복지 증진",
-    explanation:
-      "공적개발원조는 개발도상국의 경제 발전과 사회복지 증진을 주된 목적으로 합니다.",
-    mistakeType: "단순 실수",
-    reviewCount: 3,
-    mastered: true,
-  },
-];
+type WrongAnswerForm = {
+  subjectName: string;
+  question: string;
+  wrongAnswer: string;
+  correctAnswer: string;
+  explanation: string;
+  difficulty: string;
+};
 
-const mistakeTypes = [
-  {
-    label: "개념 부족",
-    count: 1,
-    description: "핵심 개념을 충분히 이해하지 못한 문제",
-  },
-  {
-    label: "헷갈림",
-    count: 1,
-    description: "비슷한 개념이나 선택지를 혼동한 문제",
-  },
-  {
-    label: "단순 실수",
-    count: 1,
-    description: "문제를 잘못 읽거나 선택을 실수한 문제",
-  },
-];
+const initialForm: WrongAnswerForm = {
+  subjectName: "",
+  question: "",
+  wrongAnswer: "",
+  correctAnswer: "",
+  explanation: "",
+  difficulty: "보통",
+};
 
-function getMistakeTypeStyle(
-  mistakeType: WrongAnswerItem["mistakeType"]
-) {
-  if (mistakeType === "개념 부족") {
-    return "bg-rose-50 text-rose-700";
-  }
-
-  if (mistakeType === "헷갈림") {
-    return "bg-amber-50 text-amber-700";
-  }
-
-  return "bg-slate-100 text-slate-600";
-}
+const difficulties = ["쉬움", "보통", "어려움"];
 
 export default function WrongAnswersPage() {
-  const activeWrongAnswers = wrongAnswers.filter(
-    (item) => !item.mastered
-  );
+  const [items, setItems] = useState<WrongAnswer[]>([]);
+  const [form, setForm] =
+    useState<WrongAnswerForm>(initialForm);
 
-  const masteredCount = wrongAnswers.filter(
-    (item) => item.mastered
-  ).length;
+  const [editingId, setEditingId] =
+    useState<string | null>(null);
 
-  const totalReviewCount = wrongAnswers.reduce(
-    (total, item) => total + item.reviewCount,
-    0
-  );
+  const [isFormOpen, setIsFormOpen] =
+    useState(false);
+
+  const [isLoading, setIsLoading] =
+    useState(true);
+
+  const [isSaving, setIsSaving] =
+    useState(false);
+
+  const [searchKeyword, setSearchKeyword] =
+    useState("");
+
+  const [selectedSubject, setSelectedSubject] =
+    useState("전체");
+
+  const [selectedStatus, setSelectedStatus] =
+    useState("전체");
+
+  const [message, setMessage] = useState("");
+
+  const subjectOptions = useMemo(() => {
+    const names = items
+      .map((item) => item.subject_name.trim())
+      .filter(Boolean);
+
+    return [
+      "전체",
+      ...Array.from(new Set(names)).sort(),
+    ];
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    const keyword =
+      searchKeyword.trim().toLowerCase();
+
+    return items.filter((item) => {
+      const matchesKeyword =
+        !keyword ||
+        item.subject_name
+          .toLowerCase()
+          .includes(keyword) ||
+        item.question.toLowerCase().includes(keyword) ||
+        item.correct_answer
+          .toLowerCase()
+          .includes(keyword) ||
+        item.explanation
+          .toLowerCase()
+          .includes(keyword);
+
+      const matchesSubject =
+        selectedSubject === "전체" ||
+        item.subject_name === selectedSubject;
+
+      const matchesStatus =
+        selectedStatus === "전체" ||
+        (selectedStatus === "암기 완료" &&
+          item.is_mastered) ||
+        (selectedStatus === "학습 중" &&
+          !item.is_mastered);
+
+      return (
+        matchesKeyword &&
+        matchesSubject &&
+        matchesStatus
+      );
+    });
+  }, [
+    items,
+    searchKeyword,
+    selectedSubject,
+    selectedStatus,
+  ]);
+
+  const masteredCount = useMemo(() => {
+    return items.filter(
+      (item) => item.is_mastered,
+    ).length;
+  }, [items]);
+
+  const progressPercent = useMemo(() => {
+    if (items.length === 0) {
+      return 0;
+    }
+
+    return Math.round(
+      (masteredCount / items.length) * 100,
+    );
+  }, [items.length, masteredCount]);
+
+  const loadWrongAnswers = useCallback(async () => {
+    setIsLoading(true);
+    setMessage("");
+
+    const { data, error } = await supabase
+      .from("study_wrong_answers")
+      .select(
+        "id, subject_name, question, wrong_answer, correct_answer, explanation, difficulty, is_mastered, created_at",
+      )
+      .order("created_at", {
+        ascending: false,
+      });
+
+    if (error) {
+      console.error(
+        "오답노트 불러오기 오류:",
+        error,
+      );
+
+      setMessage(
+        `오답노트를 불러오지 못했어요: ${error.message}`,
+      );
+
+      setIsLoading(false);
+      return;
+    }
+
+    setItems((data ?? []) as WrongAnswer[]);
+    setIsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadWrongAnswers();
+  }, [loadWrongAnswers]);
+
+  function updateForm(
+    key: keyof WrongAnswerForm,
+    value: string,
+  ) {
+    setForm((previous) => ({
+      ...previous,
+      [key]: value,
+    }));
+  }
+
+  function openCreateForm() {
+    setForm(initialForm);
+    setEditingId(null);
+    setIsFormOpen(true);
+    setMessage("");
+  }
+
+  function closeForm() {
+    setForm(initialForm);
+    setEditingId(null);
+    setIsFormOpen(false);
+  }
+
+  function startEditing(item: WrongAnswer) {
+    setEditingId(item.id);
+
+    setForm({
+      subjectName: item.subject_name,
+      question: item.question,
+      wrongAnswer: item.wrong_answer,
+      correctAnswer: item.correct_answer,
+      explanation: item.explanation,
+      difficulty: item.difficulty,
+    });
+
+    setIsFormOpen(true);
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    const subjectName = form.subjectName.trim();
+    const question = form.question.trim();
+    const wrongAnswer = form.wrongAnswer.trim();
+    const correctAnswer =
+      form.correctAnswer.trim();
+    const explanation = form.explanation.trim();
+
+    if (!question || !correctAnswer) {
+      setMessage(
+        "문제와 정답은 반드시 입력해 주세요.",
+      );
+
+      return;
+    }
+
+    setIsSaving(true);
+    setMessage("");
+
+    const payload = {
+      subject_name: subjectName,
+      question,
+      wrong_answer: wrongAnswer,
+      correct_answer: correctAnswer,
+      explanation,
+      difficulty: form.difficulty,
+    };
+
+    if (editingId) {
+      const { error } = await supabase
+        .from("study_wrong_answers")
+        .update(payload)
+        .eq("id", editingId);
+
+      if (error) {
+        console.error("오답 수정 오류:", error);
+
+        setMessage(
+          `오답을 수정하지 못했어요: ${error.message}`,
+        );
+
+        setIsSaving(false);
+        return;
+      }
+
+      setMessage("오답이 수정되었어요.");
+    } else {
+      const { error } = await supabase
+        .from("study_wrong_answers")
+        .insert(payload);
+
+      if (error) {
+        console.error("오답 추가 오류:", error);
+
+        setMessage(
+          `오답을 추가하지 못했어요: ${error.message}`,
+        );
+
+        setIsSaving(false);
+        return;
+      }
+
+      setMessage("새 오답이 추가되었어요.");
+    }
+
+    closeForm();
+    await loadWrongAnswers();
+    setIsSaving(false);
+  }
+
+  async function toggleMastered(item: WrongAnswer) {
+    const { error } = await supabase
+      .from("study_wrong_answers")
+      .update({
+        is_mastered: !item.is_mastered,
+      })
+      .eq("id", item.id);
+
+    if (error) {
+      console.error(
+        "암기 상태 변경 오류:",
+        error,
+      );
+
+      setMessage(
+        `암기 상태를 변경하지 못했어요: ${error.message}`,
+      );
+
+      return;
+    }
+
+    setItems((previous) =>
+      previous.map((current) =>
+        current.id === item.id
+          ? {
+              ...current,
+              is_mastered:
+                !current.is_mastered,
+            }
+          : current,
+      ),
+    );
+  }
+
+  async function deleteItem(itemId: string) {
+    const shouldDelete = window.confirm(
+      "이 오답을 삭제할까요?",
+    );
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("study_wrong_answers")
+      .delete()
+      .eq("id", itemId);
+
+    if (error) {
+      console.error("오답 삭제 오류:", error);
+
+      setMessage(
+        `오답을 삭제하지 못했어요: ${error.message}`,
+      );
+
+      return;
+    }
+
+    setItems((previous) =>
+      previous.filter(
+        (item) => item.id !== itemId,
+      ),
+    );
+
+    setMessage("오답이 삭제되었어요.");
+  }
+
+  function formatDate(date: string) {
+    return new Intl.DateTimeFormat("ko-KR", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }).format(new Date(date));
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[500px] items-center justify-center">
+        <div className="text-center">
+          <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600" />
+
+          <p className="mt-4 text-sm text-slate-500">
+            오답노트를 불러오는 중이에요.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6">
-      <div className="mx-auto max-w-6xl">
-        <header className="mb-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mx-auto w-full max-w-7xl">
+      <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+        <div>
+          <p className="text-sm font-semibold tracking-[0.18em] text-indigo-600">
+            WRONG ANSWERS
+          </p>
+
+          <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-slate-900">
+            오답노트
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-slate-500">
+            틀린 문제와 정답, 해설을 기록하고
+            반복해서 복습해 보세요.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={openCreateForm}
+          className="self-start rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 lg:self-auto"
+        >
+          + 오답 추가
+        </button>
+      </header>
+
+      {message && (
+        <div className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm font-semibold text-indigo-700">
+          {message}
+        </div>
+      )}
+
+      {isFormOpen && (
+        <section className="mt-7 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-indigo-600">
-                취약 개념 복습
-              </p>
-
-              <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
-                오답노트
-              </h1>
-
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                틀린 문제와 헷갈린 개념을 다시 확인하고 반복해서
-                복습해요.
-              </p>
-            </div>
-
-            <Link
-              href="/questions"
-              className="inline-flex w-fit items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
-            >
-              문제풀이로 이동
-            </Link>
-          </div>
-        </header>
-
-        <section className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              복습할 오답
-            </p>
-
-            <p className="mt-2 text-3xl font-bold text-rose-500">
-              {activeWrongAnswers.length}
-            </p>
-
-            <p className="mt-2 text-xs text-slate-400">
-              아직 학습 완료하지 않은 문제
-            </p>
-          </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              학습 완료
-            </p>
-
-            <p className="mt-2 text-3xl font-bold text-emerald-600">
-              {masteredCount}
-            </p>
-
-            <p className="mt-2 text-xs text-slate-400">
-              반복 복습을 마친 문제
-            </p>
-          </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              누적 복습
-            </p>
-
-            <p className="mt-2 text-3xl font-bold text-indigo-600">
-              {totalReviewCount}
-            </p>
-
-            <p className="mt-2 text-xs text-slate-400">
-              모든 오답의 복습 횟수
-            </p>
-          </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              가장 많은 실수
-            </p>
-
-            <p className="mt-2 text-2xl font-bold text-amber-600">
-              개념 부족
-            </p>
-
-            <p className="mt-2 text-xs text-slate-400">
-              최근 오답 기준
-            </p>
-          </article>
-        </section>
-
-        <section className="mb-8 grid gap-6 lg:grid-cols-[1.5fr_0.7fr]">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">
-                  복습할 문제
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  틀린 문제를 하나씩 다시 확인해요.
-                </p>
-              </div>
-
-              <div className="flex gap-2">
-                <select
-                  disabled
-                  aria-label="과목 필터"
-                  className="cursor-not-allowed rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500"
-                >
-                  <option>모든 과목</option>
-                  <option>개발경제학</option>
-                  <option>국제개발협력</option>
-                  <option>중국경제</option>
-                </select>
-
-                <select
-                  disabled
-                  aria-label="실수 유형 필터"
-                  className="cursor-not-allowed rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500"
-                >
-                  <option>모든 유형</option>
-                  <option>개념 부족</option>
-                  <option>헷갈림</option>
-                  <option>단순 실수</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-5">
-              {wrongAnswers.map((item, index) => (
-                <article
-                  key={item.id}
-                  className={`rounded-2xl border p-5 ${
-                    item.mastered
-                      ? "border-emerald-200 bg-emerald-50/40"
-                      : "border-slate-200 bg-white"
-                  }`}
-                >
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
-                          {index + 1}
-                        </span>
-
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${getMistakeTypeStyle(
-                            item.mistakeType
-                          )}`}
-                        >
-                          {item.mistakeType}
-                        </span>
-
-                        {item.mastered && (
-                          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-                            학습 완료
-                          </span>
-                        )}
-
-                        <span className="text-xs text-slate-400">
-                          복습 {item.reviewCount}회
-                        </span>
-                      </div>
-
-                      <h3 className="mt-4 text-base font-bold leading-7 text-slate-900">
-                        {item.question}
-                      </h3>
-
-                      <p className="mt-2 text-sm text-slate-500">
-                        {item.subject} · {item.week}
-                      </p>
-
-                      <p className="mt-1 truncate text-xs text-slate-400">
-                        {item.material}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 grid gap-3 md:grid-cols-2">
-                    <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
-                      <p className="text-xs font-bold text-rose-600">
-                        내가 선택한 답
-                      </p>
-
-                      <p className="mt-2 text-sm leading-6 text-rose-900">
-                        {item.selectedAnswer}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                      <p className="text-xs font-bold text-emerald-600">
-                        정답
-                      </p>
-
-                      <p className="mt-2 text-sm leading-6 text-emerald-900">
-                        {item.correctAnswer}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 rounded-xl bg-slate-50 p-4">
-                    <p className="text-xs font-bold text-slate-500">
-                      해설
-                    </p>
-
-                    <p className="mt-2 text-sm leading-6 text-slate-700">
-                      {item.explanation}
-                    </p>
-                  </div>
-
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled
-                      className="cursor-not-allowed rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-400"
-                    >
-                      다시 풀기
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled
-                      className="cursor-not-allowed rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-400"
-                    >
-                      비슷한 문제 만들기
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled
-                      className="cursor-not-allowed rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-400"
-                    >
-                      {item.mastered
-                        ? "학습 완료 취소"
-                        : "학습 완료"}
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-
-          <aside className="space-y-6">
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-bold text-slate-900">
-                실수 유형
+              <h2 className="text-xl font-extrabold text-slate-900">
+                {editingId
+                  ? "오답 수정"
+                  : "새 오답 추가"}
               </h2>
 
-              <p className="mt-1 text-sm text-slate-500">
-                어떤 이유로 자주 틀리는지 확인해요.
+              <p className="mt-2 text-sm text-slate-500">
+                문제와 정답을 중심으로 입력하면
+                나중에 검색해서 복습할 수 있어요.
               </p>
+            </div>
 
-              <div className="mt-5 space-y-4">
-                {mistakeTypes.map((type) => (
-                  <article
-                    key={type.label}
-                    className="rounded-xl border border-slate-200 p-4"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${getMistakeTypeStyle(
-                          type.label as WrongAnswerItem["mistakeType"]
-                        )}`}
+            <button
+              type="button"
+              onClick={closeForm}
+              aria-label="입력창 닫기"
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-lg text-slate-500 transition hover:bg-slate-50"
+            >
+              ×
+            </button>
+          </div>
+
+          <form
+            onSubmit={handleSubmit}
+            className="mt-7 space-y-5"
+          >
+            <div className="grid gap-5 md:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  과목
+                </span>
+
+                <input
+                  value={form.subjectName}
+                  onChange={(event) =>
+                    updateForm(
+                      "subjectName",
+                      event.target.value,
+                    )
+                  }
+                  placeholder="예: 개발경제학"
+                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  난이도
+                </span>
+
+                <select
+                  value={form.difficulty}
+                  onChange={(event) =>
+                    updateForm(
+                      "difficulty",
+                      event.target.value,
+                    )
+                  }
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                >
+                  {difficulties.map(
+                    (difficulty) => (
+                      <option
+                        key={difficulty}
+                        value={difficulty}
                       >
-                        {type.label}
-                      </span>
+                        {difficulty}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
+            </div>
 
-                      <span className="text-lg font-bold text-slate-900">
-                        {type.count}
-                      </span>
-                    </div>
-
-                    <p className="mt-3 text-xs leading-5 text-slate-500">
-                      {type.description}
-                    </p>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-slate-900 p-6 text-white shadow-sm">
-              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-indigo-200">
-                오늘의 복습 추천
+            <label className="block">
+              <span className="mb-2 block text-sm font-bold text-slate-700">
+                문제
               </span>
 
-              <h2 className="mt-4 text-xl font-bold">
-                개발 모델 비교 개념을 다시 봐요
-              </h2>
+              <textarea
+                value={form.question}
+                onChange={(event) =>
+                  updateForm(
+                    "question",
+                    event.target.value,
+                  )
+                }
+                rows={4}
+                placeholder="틀린 문제를 입력하세요."
+                className="w-full resize-y rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+              />
+            </label>
 
-              <p className="mt-3 text-sm leading-6 text-slate-300">
-                최근 문제에서 충칭 모델과 광둥 모델의 특징을
-                혼동했어요.
-              </p>
+            <div className="grid gap-5 lg:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  내가 쓴 답
+                </span>
+
+                <textarea
+                  value={form.wrongAnswer}
+                  onChange={(event) =>
+                    updateForm(
+                      "wrongAnswer",
+                      event.target.value,
+                    )
+                  }
+                  rows={4}
+                  placeholder="내가 잘못 적었던 답"
+                  className="w-full resize-y rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  정답
+                </span>
+
+                <textarea
+                  value={form.correctAnswer}
+                  onChange={(event) =>
+                    updateForm(
+                      "correctAnswer",
+                      event.target.value,
+                    )
+                  }
+                  rows={4}
+                  placeholder="정확한 정답을 입력하세요."
+                  className="w-full resize-y rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                />
+              </label>
+            </div>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-bold text-slate-700">
+                해설과 틀린 이유
+              </span>
+
+              <textarea
+                value={form.explanation}
+                onChange={(event) =>
+                  updateForm(
+                    "explanation",
+                    event.target.value,
+                  )
+                }
+                rows={5}
+                placeholder="왜 틀렸는지, 다음에는 무엇을 확인해야 하는지 적어보세요."
+                className="w-full resize-y rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+              />
+            </label>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSaving
+                  ? "저장 중..."
+                  : editingId
+                    ? "수정 완료"
+                    : "오답 저장"}
+              </button>
 
               <button
                 type="button"
-                disabled
-                className="mt-6 w-full cursor-not-allowed rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-400"
+                onClick={closeForm}
+                className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
               >
-                추천 오답 복습
+                취소
               </button>
-            </section>
-
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-bold text-slate-900">
-                복습 기준
-              </h2>
-
-              <div className="mt-5 space-y-4 text-sm text-slate-600">
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
-                    1
-                  </span>
-
-                  <p className="leading-6">
-                    문제를 다시 풀고 정답을 확인해요.
-                  </p>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
-                    2
-                  </span>
-
-                  <p className="leading-6">
-                    비슷한 문제를 연속으로 맞히면 학습 완료로
-                    표시해요.
-                  </p>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
-                    3
-                  </span>
-
-                  <p className="leading-6">
-                    일정 기간 후 다시 복습할 문제를 추천해요.
-                  </p>
-                </div>
-              </div>
-            </section>
-          </aside>
+            </div>
+          </form>
         </section>
+      )}
 
-        <section className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-8 text-center">
-          <p className="text-3xl">✍️</p>
-
-          <h2 className="mt-3 text-lg font-bold text-slate-900">
-            실제 오답 저장 기능은 다음 단계에서 연결해요
-          </h2>
-
-          <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            문제풀이 결과를 Supabase에 저장한 뒤 틀린 문제를
-            자동으로 이 화면에 추가하고, 다시 풀기와 학습 완료
-            기능을 구현할 예정이에요.
+      <section className="mt-7 grid gap-4 sm:grid-cols-3">
+        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold tracking-wide text-slate-400">
+            전체 오답
           </p>
-        </section>
-      </div>
-    </main>
+
+          <p className="mt-3 text-2xl font-extrabold text-slate-900">
+            {items.length}개
+          </p>
+        </article>
+
+        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold tracking-wide text-slate-400">
+            암기 완료
+          </p>
+
+          <p className="mt-3 text-2xl font-extrabold text-emerald-600">
+            {masteredCount}개
+          </p>
+        </article>
+
+        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold tracking-wide text-slate-400">
+            복습 진행률
+          </p>
+
+          <p className="mt-3 text-2xl font-extrabold text-indigo-600">
+            {progressPercent}%
+          </p>
+        </article>
+      </section>
+
+      <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm font-bold text-slate-700">
+            전체 복습 진행률
+          </p>
+
+          <p className="text-sm font-extrabold text-indigo-600">
+            {masteredCount} / {items.length}
+          </p>
+        </div>
+
+        <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
+          <div
+            className="h-full rounded-full bg-indigo-600 transition-all duration-500"
+            style={{
+              width: `${progressPercent}%`,
+            }}
+          />
+        </div>
+      </section>
+
+      <section className="mt-7 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="grid gap-3 lg:grid-cols-[1fr_220px_180px]">
+          <input
+            value={searchKeyword}
+            onChange={(event) =>
+              setSearchKeyword(
+                event.target.value,
+              )
+            }
+            placeholder="과목, 문제, 정답, 해설 검색"
+            className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+          />
+
+          <select
+            value={selectedSubject}
+            onChange={(event) =>
+              setSelectedSubject(
+                event.target.value,
+              )
+            }
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+          >
+            {subjectOptions.map((subject) => (
+              <option
+                key={subject}
+                value={subject}
+              >
+                {subject === "전체"
+                  ? "전체 과목"
+                  : subject}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={selectedStatus}
+            onChange={(event) =>
+              setSelectedStatus(
+                event.target.value,
+              )
+            }
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+          >
+            <option value="전체">
+              전체 상태
+            </option>
+
+            <option value="학습 중">
+              학습 중
+            </option>
+
+            <option value="암기 완료">
+              암기 완료
+            </option>
+          </select>
+        </div>
+      </section>
+
+      <section className="mt-6">
+        {filteredItems.length > 0 ? (
+          <div className="space-y-4">
+            {filteredItems.map((item) => (
+              <article
+                key={item.id}
+                className={[
+                  "rounded-3xl border bg-white p-6 shadow-sm",
+                  item.is_mastered
+                    ? "border-emerald-200"
+                    : "border-slate-200",
+                ].join(" ")}
+              >
+                <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {item.subject_name && (
+                      <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-600">
+                        {item.subject_name}
+                      </span>
+                    )}
+
+                    <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500">
+                      난이도 {item.difficulty}
+                    </span>
+
+                    {item.is_mastered && (
+                      <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-700">
+                        암기 완료
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs font-semibold text-slate-400">
+                    {formatDate(item.created_at)}
+                  </p>
+                </div>
+
+                <div className="mt-6">
+                  <p className="text-xs font-extrabold tracking-[0.16em] text-slate-400">
+                    QUESTION
+                  </p>
+
+                  <p className="mt-3 whitespace-pre-wrap text-lg font-extrabold leading-8 text-slate-900">
+                    {item.question}
+                  </p>
+                </div>
+
+                <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-2xl border border-red-100 bg-red-50 p-5">
+                    <p className="text-xs font-extrabold tracking-wide text-red-500">
+                      내가 쓴 답
+                    </p>
+
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-red-800">
+                      {item.wrong_answer ||
+                        "입력한 답이 없어요."}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-5">
+                    <p className="text-xs font-extrabold tracking-wide text-emerald-600">
+                      정답
+                    </p>
+
+                    <p className="mt-3 whitespace-pre-wrap text-sm font-semibold leading-6 text-emerald-900">
+                      {item.correct_answer}
+                    </p>
+                  </div>
+                </div>
+
+                {item.explanation && (
+                  <div className="mt-4 rounded-2xl bg-slate-50 p-5">
+                    <p className="text-xs font-extrabold tracking-wide text-slate-500">
+                      해설과 틀린 이유
+                    </p>
+
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                      {item.explanation}
+                    </p>
+                  </div>
+                )}
+
+                <div className="mt-6 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void toggleMastered(item)
+                    }
+                    className={[
+                      "rounded-xl px-4 py-2.5 text-sm font-semibold transition",
+                      item.is_mastered
+                        ? "border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                        : "bg-emerald-600 text-white hover:bg-emerald-500",
+                    ].join(" ")}
+                  >
+                    {item.is_mastered
+                      ? "다시 학습하기"
+                      : "암기 완료"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      startEditing(item)
+                    }
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                  >
+                    수정
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void deleteItem(item.id)
+                    }
+                    className="rounded-xl border border-red-100 bg-white px-4 py-2.5 text-sm font-semibold text-red-500 transition hover:bg-red-50"
+                  >
+                    삭제
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+            <p className="font-bold text-slate-700">
+              표시할 오답이 없어요.
+            </p>
+
+            <p className="mt-2 text-sm text-slate-500">
+              새 오답을 추가하거나 검색 조건을
+              변경해 보세요.
+            </p>
+
+            <button
+              type="button"
+              onClick={openCreateForm}
+              className="mt-5 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white"
+            >
+              첫 오답 추가하기
+            </button>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

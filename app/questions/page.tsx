@@ -1,566 +1,1015 @@
-import Link from "next/link";
+"use client";
 
-type QuestionSet = {
-  id: number;
-  title: string;
-  subject: string;
-  week: string;
-  material: string;
-  questionCount: number;
-  completedCount: number;
-  score: number | null;
-  type: "객관식" | "OX" | "단답형" | "혼합";
-  status: "새 문제" | "풀이 중" | "완료";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import { supabase } from "@/lib/supabase";
+
+type StudyQuestion = {
+  id: string;
+  subject_name: string;
+  question: string;
+  answer: string;
+  memo: string;
+  priority: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
 };
 
-const questionSets: QuestionSet[] = [
-  {
-    id: 1,
-    title: "충칭·광둥 개발 모델 핵심 문제",
-    subject: "개발경제학",
-    week: "1주차",
-    material: "충칭 vs 광둥 개발 모델.pdf",
-    questionCount: 5,
-    completedCount: 5,
-    score: 80,
-    type: "객관식",
-    status: "완료",
-  },
-  {
-    id: 2,
-    title: "Lewis 잉여노동 모형 복습 문제",
-    subject: "개발경제학",
-    week: "2주차",
-    material: "Lewis 잉여노동 모형 강의자료.pdf",
-    questionCount: 10,
-    completedCount: 4,
-    score: null,
-    type: "혼합",
-    status: "풀이 중",
-  },
-  {
-    id: 3,
-    title: "국제개발협력 기본 개념 문제",
-    subject: "국제개발협력",
-    week: "3주차",
-    material: "국제개발협력 발표 자료.pptx",
-    questionCount: 8,
-    completedCount: 0,
-    score: null,
-    type: "객관식",
-    status: "새 문제",
-  },
-  {
-    id: 4,
-    title: "중국경제 개혁개방 OX 퀴즈",
-    subject: "중국경제",
-    week: "4주차",
-    material: "중국경제 핵심 개념 정리.docx",
-    questionCount: 12,
-    completedCount: 12,
-    score: 92,
-    type: "OX",
-    status: "완료",
-  },
-];
+type QuestionForm = {
+  subjectName: string;
+  question: string;
+  answer: string;
+  memo: string;
+  priority: string;
+  status: string;
+};
 
-const subjects = [
-  {
-    name: "개발경제학",
-    totalSets: 5,
-    completedSets: 2,
-    accuracy: 78,
-  },
-  {
-    name: "국제개발협력",
-    totalSets: 3,
-    completedSets: 1,
-    accuracy: 84,
-  },
-  {
-    name: "중국경제",
-    totalSets: 4,
-    completedSets: 3,
-    accuracy: 91,
-  },
-];
+const initialForm: QuestionForm = {
+  subjectName: "",
+  question: "",
+  answer: "",
+  memo: "",
+  priority: "보통",
+  status: "미해결",
+};
 
-const questionTypes = [
-  {
-    title: "객관식",
-    description: "4개의 선택지 중 정답을 골라요.",
-    icon: "①",
-  },
-  {
-    title: "OX 문제",
-    description: "문장이 맞는지 틀리는지 판단해요.",
-    icon: "○",
-  },
-  {
-    title: "단답형",
-    description: "핵심 개념이나 용어를 직접 입력해요.",
-    icon: "✎",
-  },
-  {
-    title: "혼합 문제",
-    description: "여러 문제 유형을 섞어서 풀어요.",
-    icon: "▦",
-  },
-];
+const priorities = ["낮음", "보통", "높음"];
 
-function getStatusStyle(status: QuestionSet["status"]) {
-  if (status === "완료") {
-    return "bg-emerald-50 text-emerald-700";
-  }
+const statuses = ["미해결", "확인 중", "해결 완료"];
 
-  if (status === "풀이 중") {
-    return "bg-amber-50 text-amber-700";
-  }
-
-  return "bg-indigo-50 text-indigo-700";
+function formatDate(date: string) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(date));
 }
 
-function getActionText(status: QuestionSet["status"]) {
-  if (status === "완료") {
-    return "다시 풀기";
+function getPriorityClasses(priority: string) {
+  if (priority === "높음") {
+    return "bg-red-50 text-red-600";
   }
 
-  if (status === "풀이 중") {
-    return "이어서 풀기";
+  if (priority === "낮음") {
+    return "bg-slate-100 text-slate-500";
   }
 
-  return "문제 풀기";
+  return "bg-amber-50 text-amber-600";
+}
+
+function getStatusClasses(status: string) {
+  if (status === "해결 완료") {
+    return "bg-emerald-100 text-emerald-700";
+  }
+
+  if (status === "확인 중") {
+    return "bg-blue-100 text-blue-700";
+  }
+
+  return "bg-rose-100 text-rose-700";
 }
 
 export default function QuestionsPage() {
-  const completedSets = questionSets.filter(
-    (set) => set.status === "완료"
-  ).length;
+  const [questions, setQuestions] = useState<
+    StudyQuestion[]
+  >([]);
 
-  const inProgressSets = questionSets.filter(
-    (set) => set.status === "풀이 중"
-  ).length;
+  const [form, setForm] =
+    useState<QuestionForm>(initialForm);
 
-  const completedScores = questionSets
-    .map((set) => set.score)
-    .filter((score): score is number => score !== null);
+  const [editingId, setEditingId] =
+    useState<string | null>(null);
 
-  const averageScore =
-    completedScores.length > 0
-      ? Math.round(
-          completedScores.reduce(
-            (total, score) => total + score,
-            0
-          ) / completedScores.length
+  const [isFormOpen, setIsFormOpen] =
+    useState(false);
+
+  const [isLoading, setIsLoading] =
+    useState(true);
+
+  const [isSaving, setIsSaving] =
+    useState(false);
+
+  const [searchKeyword, setSearchKeyword] =
+    useState("");
+
+  const [selectedSubject, setSelectedSubject] =
+    useState("전체");
+
+  const [selectedStatus, setSelectedStatus] =
+    useState("전체");
+
+  const [sortOption, setSortOption] =
+    useState("최신순");
+
+  const [message, setMessage] = useState("");
+
+  const subjectOptions = useMemo(() => {
+    const subjectNames = questions
+      .map((item) => item.subject_name.trim())
+      .filter(Boolean);
+
+    return [
+      "전체",
+      ...Array.from(
+        new Set(subjectNames),
+      ).sort(),
+    ];
+  }, [questions]);
+
+  const unresolvedCount = useMemo(() => {
+    return questions.filter(
+      (item) => item.status !== "해결 완료",
+    ).length;
+  }, [questions]);
+
+  const completedCount = useMemo(() => {
+    return questions.filter(
+      (item) => item.status === "해결 완료",
+    ).length;
+  }, [questions]);
+
+  const progressPercent = useMemo(() => {
+    if (questions.length === 0) {
+      return 0;
+    }
+
+    return Math.round(
+      (completedCount / questions.length) * 100,
+    );
+  }, [completedCount, questions.length]);
+
+  const filteredQuestions = useMemo(() => {
+    const keyword =
+      searchKeyword.trim().toLowerCase();
+
+    const filtered = questions.filter(
+      (item) => {
+        const matchesKeyword =
+          !keyword ||
+          item.subject_name
+            .toLowerCase()
+            .includes(keyword) ||
+          item.question
+            .toLowerCase()
+            .includes(keyword) ||
+          item.answer
+            .toLowerCase()
+            .includes(keyword) ||
+          item.memo
+            .toLowerCase()
+            .includes(keyword);
+
+        const matchesSubject =
+          selectedSubject === "전체" ||
+          item.subject_name === selectedSubject;
+
+        const matchesStatus =
+          selectedStatus === "전체" ||
+          item.status === selectedStatus;
+
+        return (
+          matchesKeyword &&
+          matchesSubject &&
+          matchesStatus
+        );
+      },
+    );
+
+    return [...filtered].sort((a, b) => {
+      if (sortOption === "오래된순") {
+        return (
+          new Date(a.created_at).getTime() -
+          new Date(b.created_at).getTime()
+        );
+      }
+
+      if (sortOption === "중요도순") {
+        const priorityOrder: Record<
+          string,
+          number
+        > = {
+          높음: 3,
+          보통: 2,
+          낮음: 1,
+        };
+
+        return (
+          (priorityOrder[b.priority] ?? 0) -
+          (priorityOrder[a.priority] ?? 0)
+        );
+      }
+
+      return (
+        new Date(b.created_at).getTime() -
+        new Date(a.created_at).getTime()
+      );
+    });
+  }, [
+    questions,
+    searchKeyword,
+    selectedSubject,
+    selectedStatus,
+    sortOption,
+  ]);
+
+  const loadQuestions = useCallback(
+    async () => {
+      setIsLoading(true);
+      setMessage("");
+
+      const { data, error } = await supabase
+        .from("study_questions")
+        .select(
+          "id, subject_name, question, answer, memo, priority, status, created_at, updated_at",
         )
-      : 0;
+        .order("created_at", {
+          ascending: false,
+        });
 
-  const totalSolvedQuestions = questionSets.reduce(
-    (total, set) => total + set.completedCount,
-    0
+      if (error) {
+        console.error(
+          "질문 불러오기 오류:",
+          error,
+        );
+
+        setMessage(
+          `질문을 불러오지 못했어요: ${error.message}`,
+        );
+
+        setIsLoading(false);
+        return;
+      }
+
+      setQuestions(
+        (data ?? []) as StudyQuestion[],
+      );
+
+      setIsLoading(false);
+    },
+    [],
   );
 
+  useEffect(() => {
+    void loadQuestions();
+  }, [loadQuestions]);
+
+  function updateForm(
+    key: keyof QuestionForm,
+    value: string,
+  ) {
+    setForm((previous) => ({
+      ...previous,
+      [key]: value,
+    }));
+  }
+
+  function openCreateForm() {
+    setForm(initialForm);
+    setEditingId(null);
+    setMessage("");
+    setIsFormOpen(true);
+  }
+
+  function closeForm() {
+    setForm(initialForm);
+    setEditingId(null);
+    setIsFormOpen(false);
+  }
+
+  function startEditing(
+    item: StudyQuestion,
+  ) {
+    setEditingId(item.id);
+
+    setForm({
+      subjectName: item.subject_name,
+      question: item.question,
+      answer: item.answer,
+      memo: item.memo,
+      priority: item.priority,
+      status: item.status,
+    });
+
+    setIsFormOpen(true);
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    const subjectName =
+      form.subjectName.trim();
+
+    const question = form.question.trim();
+    const answer = form.answer.trim();
+    const memo = form.memo.trim();
+
+    if (!question) {
+      setMessage(
+        "질문 내용을 입력해 주세요.",
+      );
+
+      return;
+    }
+
+    setIsSaving(true);
+    setMessage("");
+
+    const payload = {
+      subject_name: subjectName,
+      question,
+      answer,
+      memo,
+      priority: form.priority,
+      status: form.status,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (editingId) {
+      const { error } = await supabase
+        .from("study_questions")
+        .update(payload)
+        .eq("id", editingId);
+
+      if (error) {
+        console.error(
+          "질문 수정 오류:",
+          error,
+        );
+
+        setMessage(
+          `질문을 수정하지 못했어요: ${error.message}`,
+        );
+
+        setIsSaving(false);
+        return;
+      }
+
+      setMessage("질문이 수정되었어요.");
+    } else {
+      const { error } = await supabase
+        .from("study_questions")
+        .insert(payload);
+
+      if (error) {
+        console.error(
+          "질문 저장 오류:",
+          error,
+        );
+
+        setMessage(
+          `질문을 저장하지 못했어요: ${error.message}`,
+        );
+
+        setIsSaving(false);
+        return;
+      }
+
+      setMessage("새 질문이 저장되었어요.");
+    }
+
+    closeForm();
+    await loadQuestions();
+    setIsSaving(false);
+  }
+
+  async function updateStatus(
+    item: StudyQuestion,
+    status: string,
+  ) {
+    const { error } = await supabase
+      .from("study_questions")
+      .update({
+        status,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", item.id);
+
+    if (error) {
+      console.error(
+        "질문 상태 변경 오류:",
+        error,
+      );
+
+      setMessage(
+        `상태를 변경하지 못했어요: ${error.message}`,
+      );
+
+      return;
+    }
+
+    setQuestions((previous) =>
+      previous.map((question) =>
+        question.id === item.id
+          ? {
+              ...question,
+              status,
+              updated_at:
+                new Date().toISOString(),
+            }
+          : question,
+      ),
+    );
+
+    setMessage(
+      `질문 상태가 '${status}'로 변경되었어요.`,
+    );
+  }
+
+  async function deleteQuestion(
+    itemId: string,
+  ) {
+    const shouldDelete = window.confirm(
+      "이 질문을 삭제할까요?",
+    );
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("study_questions")
+      .delete()
+      .eq("id", itemId);
+
+    if (error) {
+      console.error(
+        "질문 삭제 오류:",
+        error,
+      );
+
+      setMessage(
+        `질문을 삭제하지 못했어요: ${error.message}`,
+      );
+
+      return;
+    }
+
+    setQuestions((previous) =>
+      previous.filter(
+        (item) => item.id !== itemId,
+      ),
+    );
+
+    setMessage("질문이 삭제되었어요.");
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[500px] items-center justify-center">
+        <div className="text-center">
+          <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600" />
+
+          <p className="mt-4 text-sm text-slate-500">
+            질문을 불러오는 중이에요.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6">
-      <div className="mx-auto max-w-6xl">
-        <header className="mb-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mx-auto w-full max-w-7xl">
+      <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+        <div>
+          <p className="text-sm font-semibold tracking-[0.18em] text-indigo-600">
+            STUDY QUESTIONS
+          </p>
+
+          <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-slate-900">
+            질문 모음
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-slate-500">
+            공부하다 생긴 질문을 저장하고 답변과
+            해결 상태를 관리해 보세요.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={openCreateForm}
+          className="self-start rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 lg:self-auto"
+        >
+          + 질문 추가
+        </button>
+      </header>
+
+      {message && (
+        <div className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm font-semibold text-indigo-700">
+          {message}
+        </div>
+      )}
+
+      {isFormOpen && (
+        <section className="mt-7 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-indigo-600">
-                AI 학습 문제
-              </p>
+              <h2 className="text-xl font-extrabold text-slate-900">
+                {editingId
+                  ? "질문 수정"
+                  : "새 질문 추가"}
+              </h2>
 
-              <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
-                문제풀이
-              </h1>
-
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                학습 자료에서 생성한 문제를 풀고 성적과 취약
-                개념을 확인해요.
+              <p className="mt-2 text-sm text-slate-500">
+                답을 아직 모른다면 질문만 먼저
+                저장해도 돼요.
               </p>
             </div>
 
-            <Link
-              href="/subjects"
-              className="inline-flex w-fit items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+            <button
+              type="button"
+              onClick={closeForm}
+              aria-label="입력창 닫기"
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-lg text-slate-500 transition hover:bg-slate-50"
             >
-              + 새 문제 만들기
-            </Link>
+              ×
+            </button>
           </div>
-        </header>
 
-        <section className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              생성된 문제 세트
-            </p>
-
-            <p className="mt-2 text-3xl font-bold text-slate-900">
-              {questionSets.length}
-            </p>
-
-            <p className="mt-2 text-xs text-slate-400">
-              모든 과목 기준
-            </p>
-          </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              완료한 세트
-            </p>
-
-            <p className="mt-2 text-3xl font-bold text-emerald-600">
-              {completedSets}
-            </p>
-
-            <p className="mt-2 text-xs text-slate-400">
-              채점을 마친 문제
-            </p>
-          </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              평균 정답률
-            </p>
-
-            <p className="mt-2 text-3xl font-bold text-indigo-600">
-              {averageScore}%
-            </p>
-
-            <p className="mt-2 text-xs text-slate-400">
-              완료한 문제 기준
-            </p>
-          </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              푼 문제
-            </p>
-
-            <p className="mt-2 text-3xl font-bold text-rose-500">
-              {totalSolvedQuestions}
-            </p>
-
-            <p className="mt-2 text-xs text-slate-400">
-              누적 풀이 문항
-            </p>
-          </article>
-        </section>
-
-        {inProgressSets > 0 && (
-          <section className="mb-8 rounded-2xl bg-slate-900 p-6 text-white shadow-sm sm:p-7">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-indigo-200">
-                  이어서 학습
+          <form
+            onSubmit={handleSubmit}
+            className="mt-7 space-y-5"
+          >
+            <div className="grid gap-5 md:grid-cols-3">
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  과목
                 </span>
 
-                <h2 className="mt-4 text-xl font-bold">
-                  풀던 문제가 남아 있어요
-                </h2>
+                <input
+                  value={form.subjectName}
+                  onChange={(event) =>
+                    updateForm(
+                      "subjectName",
+                      event.target.value,
+                    )
+                  }
+                  placeholder="예: 개발경제학"
+                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                />
+              </label>
 
-                <p className="mt-2 text-sm leading-6 text-slate-300">
-                  Lewis 잉여노동 모형 복습 문제를 4문제까지
-                  풀었어요.
-                </p>
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  중요도
+                </span>
 
-                <div className="mt-4 h-2 max-w-md overflow-hidden rounded-full bg-white/10">
-                  <div
-                    className="h-full rounded-full bg-indigo-400"
-                    style={{
-                      width: "40%",
-                    }}
-                  />
-                </div>
+                <select
+                  value={form.priority}
+                  onChange={(event) =>
+                    updateForm(
+                      "priority",
+                      event.target.value,
+                    )
+                  }
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                >
+                  {priorities.map(
+                    (priority) => (
+                      <option
+                        key={priority}
+                        value={priority}
+                      >
+                        {priority}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
 
-                <p className="mt-2 text-xs text-slate-400">
-                  4 / 10문제 완료
-                </p>
-              </div>
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  상태
+                </span>
+
+                <select
+                  value={form.status}
+                  onChange={(event) =>
+                    updateForm(
+                      "status",
+                      event.target.value,
+                    )
+                  }
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+                >
+                  {statuses.map((status) => (
+                    <option
+                      key={status}
+                      value={status}
+                    >
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-bold text-slate-700">
+                질문
+              </span>
+
+              <textarea
+                value={form.question}
+                onChange={(event) =>
+                  updateForm(
+                    "question",
+                    event.target.value,
+                  )
+                }
+                rows={4}
+                placeholder="공부하다 궁금했던 내용을 입력하세요."
+                className="w-full resize-y rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-7 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-bold text-slate-700">
+                답변
+              </span>
+
+              <textarea
+                value={form.answer}
+                onChange={(event) =>
+                  updateForm(
+                    "answer",
+                    event.target.value,
+                  )
+                }
+                rows={6}
+                placeholder="찾아본 답이나 교수님께 들은 설명을 입력하세요."
+                className="w-full resize-y rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-7 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-sm font-bold text-slate-700">
+                추가 메모
+              </span>
+
+              <textarea
+                value={form.memo}
+                onChange={(event) =>
+                  updateForm(
+                    "memo",
+                    event.target.value,
+                  )
+                }
+                rows={3}
+                placeholder="관련 페이지, 강의 주차, 다시 확인할 내용 등을 적어보세요."
+                className="w-full resize-y rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-7 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+              />
+            </label>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSaving
+                  ? "저장 중..."
+                  : editingId
+                    ? "수정 완료"
+                    : "질문 저장"}
+              </button>
 
               <button
                 type="button"
-                disabled
-                className="shrink-0 cursor-not-allowed rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-400 opacity-80"
+                onClick={closeForm}
+                className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
               >
-                이어서 풀기
+                취소
               </button>
             </div>
-          </section>
-        )}
+          </form>
+        </section>
+      )}
 
-        <section className="mb-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-5">
-            <h2 className="text-xl font-bold text-slate-900">
-              문제 유형
-            </h2>
+      <section className="mt-7 grid gap-4 sm:grid-cols-3">
+        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold tracking-wide text-slate-400">
+            전체 질문
+          </p>
 
-            <p className="mt-1 text-sm text-slate-500">
-              원하는 문제 유형을 선택해 학습할 수 있어요.
-            </p>
-          </div>
+          <p className="mt-3 text-2xl font-extrabold text-slate-900">
+            {questions.length}개
+          </p>
+        </article>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {questionTypes.map((type) => (
-              <article
-                key={type.title}
-                className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
+        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold tracking-wide text-slate-400">
+            미해결 질문
+          </p>
+
+          <p className="mt-3 text-2xl font-extrabold text-rose-600">
+            {unresolvedCount}개
+          </p>
+        </article>
+
+        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold tracking-wide text-slate-400">
+            해결률
+          </p>
+
+          <p className="mt-3 text-2xl font-extrabold text-indigo-600">
+            {progressPercent}%
+          </p>
+        </article>
+      </section>
+
+      <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm font-bold text-slate-700">
+            질문 해결 진행률
+          </p>
+
+          <p className="text-sm font-extrabold text-indigo-600">
+            {completedCount} / {questions.length}
+          </p>
+        </div>
+
+        <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
+          <div
+            className="h-full rounded-full bg-indigo-600 transition-all duration-500"
+            style={{
+              width: `${progressPercent}%`,
+            }}
+          />
+        </div>
+      </section>
+
+      <section className="mt-7 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="grid gap-3 lg:grid-cols-[1fr_200px_180px_160px]">
+          <input
+            value={searchKeyword}
+            onChange={(event) =>
+              setSearchKeyword(
+                event.target.value,
+              )
+            }
+            placeholder="과목, 질문, 답변, 메모 검색"
+            className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
+          />
+
+          <select
+            value={selectedSubject}
+            onChange={(event) =>
+              setSelectedSubject(
+                event.target.value,
+              )
+            }
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+          >
+            {subjectOptions.map((subject) => (
+              <option
+                key={subject}
+                value={subject}
               >
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-xl font-bold text-indigo-600 shadow-sm">
-                  {type.icon}
+                {subject === "전체"
+                  ? "전체 과목"
+                  : subject}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={selectedStatus}
+            onChange={(event) =>
+              setSelectedStatus(
+                event.target.value,
+              )
+            }
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+          >
+            <option value="전체">
+              전체 상태
+            </option>
+
+            {statuses.map((status) => (
+              <option
+                key={status}
+                value={status}
+              >
+                {status}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={sortOption}
+            onChange={(event) =>
+              setSortOption(event.target.value)
+            }
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+          >
+            <option value="최신순">
+              최신순
+            </option>
+
+            <option value="오래된순">
+              오래된순
+            </option>
+
+            <option value="중요도순">
+              중요도순
+            </option>
+          </select>
+        </div>
+      </section>
+
+      <section className="mt-6">
+        {filteredQuestions.length > 0 ? (
+          <div className="space-y-4">
+            {filteredQuestions.map((item) => (
+              <article
+                key={item.id}
+                className={[
+                  "rounded-3xl border bg-white p-6 shadow-sm",
+                  item.status === "해결 완료"
+                    ? "border-emerald-200"
+                    : "border-slate-200",
+                ].join(" ")}
+              >
+                <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {item.subject_name && (
+                      <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-600">
+                        {item.subject_name}
+                      </span>
+                    )}
+
+                    <span
+                      className={[
+                        "rounded-full px-3 py-1.5 text-xs font-bold",
+                        getPriorityClasses(
+                          item.priority,
+                        ),
+                      ].join(" ")}
+                    >
+                      중요도 {item.priority}
+                    </span>
+
+                    <span
+                      className={[
+                        "rounded-full px-3 py-1.5 text-xs font-bold",
+                        getStatusClasses(
+                          item.status,
+                        ),
+                      ].join(" ")}
+                    >
+                      {item.status}
+                    </span>
+                  </div>
+
+                  <p className="text-xs font-semibold text-slate-400">
+                    {formatDate(item.created_at)}
+                  </p>
                 </div>
 
-                <h3 className="mt-4 font-bold text-slate-900">
-                  {type.title}
-                </h3>
+                <div className="mt-6">
+                  <p className="text-xs font-extrabold tracking-[0.16em] text-slate-400">
+                    QUESTION
+                  </p>
 
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  {type.description}
-                </p>
+                  <p className="mt-3 whitespace-pre-wrap text-lg font-extrabold leading-8 text-slate-900">
+                    {item.question}
+                  </p>
+                </div>
 
-                <button
-                  type="button"
-                  disabled
-                  className="mt-5 w-full cursor-not-allowed rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-400"
-                >
-                  유형 선택
-                </button>
+                <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 p-5">
+                  <p className="text-xs font-extrabold tracking-wide text-indigo-600">
+                    ANSWER
+                  </p>
+
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                    {item.answer ||
+                      "아직 등록된 답변이 없어요."}
+                  </p>
+                </div>
+
+                {item.memo && (
+                  <div className="mt-4 rounded-2xl bg-slate-50 p-5">
+                    <p className="text-xs font-extrabold tracking-wide text-slate-500">
+                      추가 메모
+                    </p>
+
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                      {item.memo}
+                    </p>
+                  </div>
+                )}
+
+                <div className="mt-6 flex flex-wrap gap-2">
+                  {item.status !==
+                    "해결 완료" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void updateStatus(
+                          item,
+                          "해결 완료",
+                        )
+                      }
+                      className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500"
+                    >
+                      해결 완료
+                    </button>
+                  )}
+
+                  {item.status === "미해결" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void updateStatus(
+                          item,
+                          "확인 중",
+                        )
+                      }
+                      className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+                    >
+                      확인 중으로 변경
+                    </button>
+                  )}
+
+                  {item.status ===
+                    "해결 완료" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void updateStatus(
+                          item,
+                          "미해결",
+                        )
+                      }
+                      className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 transition hover:bg-amber-100"
+                    >
+                      다시 확인하기
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      startEditing(item)
+                    }
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                  >
+                    수정
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void deleteQuestion(
+                        item.id,
+                      )
+                    }
+                    className="rounded-xl border border-red-100 bg-white px-4 py-2.5 text-sm font-semibold text-red-500 transition hover:bg-red-50"
+                  >
+                    삭제
+                  </button>
+                </div>
               </article>
             ))}
           </div>
-        </section>
+        ) : (
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+            <p className="font-bold text-slate-700">
+              표시할 질문이 없어요.
+            </p>
 
-        <section className="mb-8 grid gap-6 lg:grid-cols-[1.5fr_0.7fr]">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">
-                  문제 세트
-                </h2>
+            <p className="mt-2 text-sm text-slate-500">
+              새 질문을 추가하거나 검색 조건을
+              변경해 보세요.
+            </p>
 
-                <p className="mt-1 text-sm text-slate-500">
-                  최근 생성된 문제부터 표시돼요.
-                </p>
-              </div>
-
-              <div className="flex gap-2">
-                <select
-                  disabled
-                  aria-label="과목별 필터"
-                  className="cursor-not-allowed rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500"
-                >
-                  <option>모든 과목</option>
-                  <option>개발경제학</option>
-                  <option>국제개발협력</option>
-                  <option>중국경제</option>
-                </select>
-
-                <select
-                  disabled
-                  aria-label="풀이 상태 필터"
-                  className="cursor-not-allowed rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500"
-                >
-                  <option>모든 상태</option>
-                  <option>새 문제</option>
-                  <option>풀이 중</option>
-                  <option>완료</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {questionSets.map((set) => {
-                const progress = Math.round(
-                  (set.completedCount / set.questionCount) *
-                    100
-                );
-
-                return (
-                  <article
-                    key={set.id}
-                    className="rounded-2xl border border-slate-200 p-5 transition hover:border-indigo-200 hover:bg-indigo-50/20"
-                  >
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusStyle(
-                              set.status
-                            )}`}
-                          >
-                            {set.status}
-                          </span>
-
-                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                            {set.type}
-                          </span>
-
-                          <span className="text-xs text-slate-400">
-                            {set.questionCount}문제
-                          </span>
-                        </div>
-
-                        <h3 className="mt-3 break-words font-bold leading-6 text-slate-900">
-                          {set.title}
-                        </h3>
-
-                        <p className="mt-2 text-sm text-slate-500">
-                          {set.subject} · {set.week}
-                        </p>
-
-                        <p className="mt-1 truncate text-xs text-slate-400">
-                          {set.material}
-                        </p>
-                      </div>
-
-                      {set.score !== null && (
-                        <div className="shrink-0 text-left sm:text-right">
-                          <p className="text-xs text-slate-400">
-                            최근 점수
-                          </p>
-
-                          <p className="mt-1 text-2xl font-bold text-indigo-600">
-                            {set.score}점
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-5">
-                      <div className="mb-2 flex items-center justify-between text-xs">
-                        <span className="font-medium text-slate-500">
-                          풀이 진도
-                        </span>
-
-                        <span className="font-bold text-slate-700">
-                          {set.completedCount}/
-                          {set.questionCount}
-                        </span>
-                      </div>
-
-                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full bg-indigo-600"
-                          style={{
-                            width: `${progress}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled
-                        className="cursor-not-allowed rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-400"
-                      >
-                        {getActionText(set.status)}
-                      </button>
-
-                      {set.status === "완료" && (
-                        <Link
-                          href="/wrong-answers"
-                          className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                        >
-                          오답 확인
-                        </Link>
-                      )}
-
-                      <button
-                        type="button"
-                        disabled
-                        className="cursor-not-allowed rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-400"
-                      >
-                        결과 보기
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+            <button
+              type="button"
+              onClick={openCreateForm}
+              className="mt-5 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white"
+            >
+              첫 질문 추가하기
+            </button>
           </div>
-
-          <aside className="space-y-6">
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-bold text-slate-900">
-                과목별 정답률
-              </h2>
-
-              <p className="mt-1 text-sm text-slate-500">
-                취약 과목을 확인해요.
-              </p>
-
-              <div className="mt-5 space-y-5">
-                {subjects.map((subject) => (
-                  <article key={subject.name}>
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-bold text-slate-900">
-                          {subject.name}
-                        </h3>
-
-                        <p className="mt-1 text-xs text-slate-400">
-                          완료 {subject.completedSets}/
-                          {subject.totalSets}세트
-                        </p>
-                      </div>
-
-                      <span className="text-sm font-bold text-indigo-600">
-                        {subject.accuracy}%
-                      </span>
-                    </div>
-
-                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full bg-indigo-600"
-                        style={{
-                          width: `${subject.accuracy}%`,
-                        }}
-                      />
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-indigo-600 p-6 text-white shadow-sm">
-              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-indigo-100">
-                오늘의 추천
-              </span>
-
-              <h2 className="mt-4 text-xl font-bold">
-                개발경제학 오답을 복습해요
-              </h2>
-
-              <p className="mt-3 text-sm leading-6 text-indigo-100">
-                최근 문제에서 개발 모델 비교 개념을 자주
-                틀렸어요.
-              </p>
-
-              <Link
-                href="/wrong-answers"
-                className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-white px-4 py-3 text-sm font-semibold text-indigo-700"
-              >
-                오답 복습하기
-              </Link>
-            </section>
-          </aside>
-        </section>
-
-        <section className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-8 text-center">
-          <p className="text-3xl">📝</p>
-
-          <h2 className="mt-3 text-lg font-bold text-slate-900">
-            실제 문제 기록은 다음 단계에서 연결해요
-          </h2>
-
-          <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            메뉴 화면을 모두 완성한 후 AI가 생성한 문제와
-            사용자의 답안, 점수, 풀이 진도를 Supabase에
-            저장해서 이 화면에 실제 기록을 표시할 예정이에요.
-          </p>
-        </section>
-      </div>
-    </main>
+        )}
+      </section>
+    </div>
   );
 }

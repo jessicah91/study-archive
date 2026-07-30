@@ -38,6 +38,17 @@ const menuItems: MenuItem[] = [
     icon: "🤖",
   },
   {
+  name: "질문 모음",
+  href: "/questions",
+  icon: "?",
+  },
+  {
+    name: "오답노트",
+    href: "/wrong-answers",
+    icon: "!",
+  },
+  {
+    
   name: "암기카드",
   href: "/flashcards",
   icon: "▣",
@@ -56,11 +67,6 @@ const menuItems: MenuItem[] = [
     name: "문제 풀이",
     href: "/questions",
     icon: "?",
-  },
-  {
-    name: "오답노트",
-    href: "/wrong-answers",
-    icon: "!",
   },
   {
     name: "자료실",
