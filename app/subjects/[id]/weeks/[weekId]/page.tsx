@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import {
+  ChangeEvent,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -12,17 +13,6 @@ import {
 import { supabase } from "@/lib/supabase";
 
 const STORAGE_BUCKET = "study-materials";
-
-type StudyMaterial = {
-  id: string;
-  subject_id: string;
-  week_id: string;
-  original_name: string;
-  storage_path: string;
-  file_type: string | null;
-  file_size: number;
-  created_at: string;
-};
 
 type Subject = {
   id: string;
@@ -35,32 +25,20 @@ type StudyWeek = {
   subject_id: string;
   week_number: number;
   title: string;
+  start_date: string | null;
+  end_date: string | null;
+  description: string | null;
 };
 
-type DocumentContent = {
-  material_id: string;
-  ai_status: string;
-  extracted_text: string | null;
-};
-
-type LibraryItem = StudyMaterial & {
-  subjectName: string;
-  subjectColor: string;
-  weekNumber: number | null;
-  weekTitle: string;
-  aiStatus: string;
-  hasExtractedText: boolean;
-  hasSummary: boolean;
-  hasQuiz: boolean;
-};
-
-type SummaryApiResponse = {
-  summary?: unknown;
-};
-
-type QuizApiResponse = {
-  quiz?: unknown;
-  questions?: unknown[];
+type StudyMaterial = {
+  id: string;
+  subject_id: string;
+  week_id: string;
+  original_name: string;
+  storage_path: string;
+  file_type: string | null;
+  file_size: number;
+  created_at: string;
 };
 
 function formatFileSize(bytes: number) {
@@ -79,7 +57,11 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(value: string) {
+function formatDate(value: string | null) {
+  if (!value) {
+    return "";
+  }
+
   return new Intl.DateTimeFormat("ko-KR", {
     year: "numeric",
     month: "short",
@@ -91,31 +73,22 @@ function getExtension(fileName: string) {
   return fileName.split(".").pop()?.toLowerCase() ?? "";
 }
 
-function getFileCategory(fileName: string) {
+function getFileLabel(fileName: string) {
   const extension = getExtension(fileName);
 
   if (extension === "pdf") {
     return "PDF";
   }
 
-  if (
-    extension === "ppt" ||
-    extension === "pptx"
-  ) {
+  if (extension === "ppt" || extension === "pptx") {
     return "PPT";
   }
 
-  if (
-    extension === "doc" ||
-    extension === "docx"
-  ) {
+  if (extension === "doc" || extension === "docx") {
     return "WORD";
   }
 
-  if (
-    extension === "xls" ||
-    extension === "xlsx"
-  ) {
+  if (extension === "xls" || extension === "xlsx") {
     return "EXCEL";
   }
 
@@ -132,463 +105,245 @@ function getFileCategory(fileName: string) {
     return "TEXT";
   }
 
-  return "OTHER";
+  return extension.toUpperCase() || "FILE";
 }
 
-function getFileTypeStyle(fileType: string) {
-  if (fileType === "PDF") {
+function getFileLabelClass(fileName: string) {
+  const label = getFileLabel(fileName);
+
+  if (label === "PDF") {
     return "bg-rose-50 text-rose-700";
   }
 
-  if (fileType === "PPT") {
+  if (label === "PPT") {
     return "bg-orange-50 text-orange-700";
   }
 
-  if (fileType === "WORD") {
+  if (label === "WORD") {
     return "bg-blue-50 text-blue-700";
   }
 
-  if (fileType === "EXCEL") {
+  if (label === "EXCEL") {
     return "bg-emerald-50 text-emerald-700";
   }
 
-  if (fileType === "IMAGE") {
+  if (label === "IMAGE") {
     return "bg-violet-50 text-violet-700";
   }
 
   return "bg-slate-100 text-slate-600";
 }
 
-function getAiStatusLabel(item: LibraryItem) {
-  if (item.hasSummary) {
-    return "AI 요약 완료";
-  }
+export default function WeekDetailPage() {
+  const params = useParams<{
+    id: string;
+    weekId: string;
+  }>();
 
-  if (item.hasExtractedText) {
-    return "텍스트 추출 완료";
-  }
+  const subjectId = params.id;
+  const weekId = params.weekId;
 
-  if (
-    item.aiStatus === "processing" ||
-    item.aiStatus === "extracting"
-  ) {
-    return "처리 중";
-  }
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  if (item.aiStatus === "failed") {
-    return "처리 실패";
-  }
+  const [subject, setSubject] = useState<Subject | null>(null);
+  const [week, setWeek] = useState<StudyWeek | null>(null);
+  const [materials, setMaterials] = useState<StudyMaterial[]>([]);
 
-  return "처리 대기";
-}
-
-function getAiStatusStyle(item: LibraryItem) {
-  if (item.hasSummary) {
-    return "bg-emerald-50 text-emerald-700";
-  }
-
-  if (item.hasExtractedText) {
-    return "bg-indigo-50 text-indigo-700";
-  }
-
-  if (
-    item.aiStatus === "processing" ||
-    item.aiStatus === "extracting"
-  ) {
-    return "bg-amber-50 text-amber-700";
-  }
-
-  if (item.aiStatus === "failed") {
-    return "bg-red-50 text-red-700";
-  }
-
-  return "bg-slate-100 text-slate-600";
-}
-
-async function checkSummary(materialId: string) {
-  try {
-    const response = await fetch(
-      `/api/materials/summarize?materialId=${encodeURIComponent(
-        materialId,
-      )}`,
-      {
-        method: "GET",
-        cache: "no-store",
-      },
-    );
-
-    if (!response.ok) {
-      return false;
-    }
-
-    const result =
-      (await response.json()) as SummaryApiResponse;
-
-    return Boolean(result.summary);
-  } catch {
-    return false;
-  }
-}
-
-async function checkQuiz(materialId: string) {
-  try {
-    const response = await fetch(
-      `/api/materials/quiz?materialId=${encodeURIComponent(
-        materialId,
-      )}`,
-      {
-        method: "GET",
-        cache: "no-store",
-      },
-    );
-
-    if (!response.ok) {
-      return false;
-    }
-
-    const result =
-      (await response.json()) as QuizApiResponse;
-
-    return Boolean(
-      result.quiz ||
-        (Array.isArray(result.questions) &&
-          result.questions.length > 0),
-    );
-  } catch {
-    return false;
-  }
-}
-
-export default function LibraryPage() {
-  const [items, setItems] = useState<LibraryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isOpening, setIsOpening] = useState<string | null>(
-    null,
-  );
-  const [isDeleting, setIsDeleting] = useState<
+  const [isUploading, setIsUploading] = useState(false);
+  const [openingMaterialId, setOpeningMaterialId] = useState<
+    string | null
+  >(null);
+  const [deletingMaterialId, setDeletingMaterialId] = useState<
     string | null
   >(null);
 
-  const [searchKeyword, setSearchKeyword] =
-    useState("");
-  const [selectedSubject, setSelectedSubject] =
-    useState("전체");
-  const [selectedFileType, setSelectedFileType] =
-    useState("전체");
-  const [selectedStatus, setSelectedStatus] =
-    useState("전체");
-  const [sortOption, setSortOption] =
-    useState("최신순");
-
   const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [uploadSubjectId, setUploadSubjectId] = useState("");
-  const [uploadWeekId, setUploadWeekId] = useState("");
-  const [uploadSubjects, setUploadSubjects] = useState<Subject[]>([]);
-  const [uploadWeeks, setUploadWeeks] = useState<StudyWeek[]>([]);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
+  const loadPage = useCallback(async () => {
+    if (!subjectId || !weekId) {
+      setErrorMessage("과목 또는 주차 ID를 찾을 수 없어요.");
+      setIsLoading(false);
+      return;
+    }
 
-  const loadLibrary = useCallback(async () => {
     setIsLoading(true);
     setMessage("");
+    setErrorMessage("");
 
-    const [
-      materialsResult,
-      subjectsResult,
-      weeksResult,
-      contentsResult,
-    ] = await Promise.all([
-      supabase
-        .from("study_materials")
-        .select(
-          "id, subject_id, week_id, original_name, storage_path, file_type, file_size, created_at",
-        )
-        .order("created_at", {
-          ascending: false,
-        }),
+    const [subjectResult, weekResult, materialsResult] =
+      await Promise.all([
+        supabase
+          .from("study_subjects")
+          .select("id, name, color")
+          .eq("id", subjectId)
+          .maybeSingle(),
 
-      supabase
-        .from("study_subjects")
-        .select("id, name, color"),
+        supabase
+          .from("study_weeks")
+          .select(
+            "id, subject_id, week_number, title, start_date, end_date, description",
+          )
+          .eq("id", weekId)
+          .eq("subject_id", subjectId)
+          .maybeSingle(),
 
-      supabase
-        .from("study_weeks")
-        .select(
-          "id, subject_id, week_number, title",
-        ),
+        supabase
+          .from("study_materials")
+          .select(
+            "id, subject_id, week_id, original_name, storage_path, file_type, file_size, created_at",
+          )
+          .eq("subject_id", subjectId)
+          .eq("week_id", weekId)
+          .order("created_at", {
+            ascending: false,
+          }),
+      ]);
 
-      supabase
-        .from("study_document_contents")
-        .select(
-          "material_id, ai_status, extracted_text",
-        ),
-    ]);
+    if (subjectResult.error) {
+      console.error(subjectResult.error);
+      setErrorMessage(
+        `과목 정보를 불러오지 못했어요: ${subjectResult.error.message}`,
+      );
+      setIsLoading(false);
+      return;
+    }
+
+    if (!subjectResult.data) {
+      setErrorMessage("존재하지 않거나 삭제된 과목이에요.");
+      setIsLoading(false);
+      return;
+    }
+
+    if (weekResult.error) {
+      console.error(weekResult.error);
+      setErrorMessage(
+        `주차 정보를 불러오지 못했어요: ${weekResult.error.message}`,
+      );
+      setIsLoading(false);
+      return;
+    }
+
+    if (!weekResult.data) {
+      setErrorMessage("존재하지 않거나 삭제된 주차예요.");
+      setIsLoading(false);
+      return;
+    }
 
     if (materialsResult.error) {
       console.error(materialsResult.error);
-
-      setMessage(
+      setErrorMessage(
         `자료를 불러오지 못했어요: ${materialsResult.error.message}`,
       );
       setIsLoading(false);
       return;
     }
 
-    if (subjectsResult.error) {
-      console.error(subjectsResult.error);
-
-      setMessage(
-        `과목 정보를 불러오지 못했어요: ${subjectsResult.error.message}`,
-      );
-      setIsLoading(false);
-      return;
-    }
-
-    if (weeksResult.error) {
-      console.error(weeksResult.error);
-
-      setMessage(
-        `주차 정보를 불러오지 못했어요: ${weeksResult.error.message}`,
-      );
-      setIsLoading(false);
-      return;
-    }
-
-    const materials =
-      (materialsResult.data ?? []) as StudyMaterial[];
-
-    const subjects =
-      (subjectsResult.data ?? []) as Subject[];
-
-    const weeks =
-      (weeksResult.data ?? []) as StudyWeek[];
-
-    const contents = contentsResult.error
-      ? []
-      : ((contentsResult.data ??
-          []) as DocumentContent[]);
-
-    const baseItems = materials.map((material) => {
-      const subject = subjects.find(
-        (item) => item.id === material.subject_id,
-      );
-
-      const week = weeks.find(
-        (item) => item.id === material.week_id,
-      );
-
-      const content = contents.find(
-        (item) =>
-          item.material_id === material.id,
-      );
-
-      return {
-        ...material,
-        subjectName:
-          subject?.name ?? "삭제된 과목",
-        subjectColor:
-          subject?.color ?? "#6366f1",
-        weekNumber:
-          week?.week_number ?? null,
-        weekTitle:
-          week?.title ?? "주차 정보 없음",
-        aiStatus:
-          content?.ai_status ?? "pending",
-        hasExtractedText: Boolean(
-          content?.extracted_text?.trim(),
-        ),
-        hasSummary: false,
-        hasQuiz: false,
-      };
-    });
-
-    setItems(baseItems);
-
-    if (baseItems.length > 0) {
-      const statusResults = await Promise.all(
-        baseItems.map(async (item) => {
-          const [hasSummary, hasQuiz] =
-            await Promise.all([
-              checkSummary(item.id),
-              checkQuiz(item.id),
-            ]);
-
-          return {
-            id: item.id,
-            hasSummary,
-            hasQuiz,
-          };
-        }),
-      );
-
-      const statusMap = new Map(
-        statusResults.map((result) => [
-          result.id,
-          result,
-        ]),
-      );
-
-      setItems(
-        baseItems.map((item) => {
-          const status = statusMap.get(item.id);
-
-          return {
-            ...item,
-            hasSummary:
-              status?.hasSummary ?? false,
-            hasQuiz: status?.hasQuiz ?? false,
-          };
-        }),
-      );
-    }
+    setSubject(subjectResult.data as Subject);
+    setWeek(weekResult.data as StudyWeek);
+    setMaterials(
+      (materialsResult.data ?? []) as StudyMaterial[],
+    );
 
     setIsLoading(false);
-  }, []);
+  }, [subjectId, weekId]);
 
   useEffect(() => {
-    void loadLibrary();
-  }, [loadLibrary]);
+    void loadPage();
+  }, [loadPage]);
 
-  const subjectOptions = useMemo(() => {
-    return [
-      "전체",
-      ...Array.from(
-        new Set(
-          items.map((item) => item.subjectName),
-        ),
-      ).sort(),
-    ];
-  }, [items]);
-
-  const filteredItems = useMemo(() => {
-    const keyword =
-      searchKeyword.trim().toLowerCase();
-
-    const filtered = items.filter((item) => {
-      const fileCategory =
-        getFileCategory(item.original_name);
-
-      const matchesKeyword =
-        !keyword ||
-        item.original_name
-          .toLowerCase()
-          .includes(keyword) ||
-        item.subjectName
-          .toLowerCase()
-          .includes(keyword) ||
-        item.weekTitle
-          .toLowerCase()
-          .includes(keyword);
-
-      const matchesSubject =
-        selectedSubject === "전체" ||
-        item.subjectName === selectedSubject;
-
-      const matchesFileType =
-        selectedFileType === "전체" ||
-        fileCategory === selectedFileType;
-
-      const statusLabel =
-        getAiStatusLabel(item);
-
-      const matchesStatus =
-        selectedStatus === "전체" ||
-        statusLabel === selectedStatus;
-
-      return (
-        matchesKeyword &&
-        matchesSubject &&
-        matchesFileType &&
-        matchesStatus
-      );
-    });
-
-    return [...filtered].sort((a, b) => {
-      if (sortOption === "오래된순") {
-        return (
-          new Date(a.created_at).getTime() -
-          new Date(b.created_at).getTime()
-        );
-      }
-
-      if (sortOption === "이름순") {
-        return a.original_name.localeCompare(
-          b.original_name,
-          "ko",
-        );
-      }
-
-      if (sortOption === "용량 큰 순") {
-        return b.file_size - a.file_size;
-      }
-
-      return (
-        new Date(b.created_at).getTime() -
-        new Date(a.created_at).getTime()
-      );
-    });
-  }, [
-    items,
-    searchKeyword,
-    selectedSubject,
-    selectedFileType,
-    selectedStatus,
-    sortOption,
-  ]);
-
-  const summaryCount = useMemo(() => {
-    return items.filter(
-      (item) => item.hasSummary,
-    ).length;
-  }, [items]);
-
-  const quizCount = useMemo(() => {
-    return items.filter(
-      (item) => item.hasQuiz,
-    ).length;
-  }, [items]);
-
-  const extractedCount = useMemo(() => {
-    return items.filter(
-      (item) => item.hasExtractedText,
-    ).length;
-  }, [items]);
-
-  const totalStorage = useMemo(() => {
-    return items.reduce(
-      (total, item) =>
-        total + (item.file_size || 0),
-      0,
-    );
-  }, [items]);
-
-  async function openMaterial(
-    item: LibraryItem,
+  async function handleFileSelected(
+    event: ChangeEvent<HTMLInputElement>,
   ) {
-    setIsOpening(item.id);
+    const file = event.target.files?.[0];
+
+    event.target.value = "";
+
+    if (!file || !subjectId || !weekId) {
+      return;
+    }
+
+    setIsUploading(true);
     setMessage("");
 
-    const { data, error } =
+    const safeFileName = file.name.replace(
+      /[^a-zA-Z0-9가-힣._-]/g,
+      "_",
+    );
+
+    const storagePath =
+      `${subjectId}/${weekId}/` +
+      `${crypto.randomUUID()}-${safeFileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(storagePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType:
+          file.type || "application/octet-stream",
+      });
+
+    if (uploadError) {
+      console.error(uploadError);
+      setMessage(
+        `파일 업로드에 실패했어요: ${uploadError.message}`,
+      );
+      setIsUploading(false);
+      return;
+    }
+
+    const { error: insertError } = await supabase
+      .from("study_materials")
+      .insert({
+        subject_id: subjectId,
+        week_id: weekId,
+        original_name: file.name,
+        storage_path: storagePath,
+        file_type:
+          file.type || getExtension(file.name) || null,
+        file_size: file.size,
+      });
+
+    if (insertError) {
+      console.error(insertError);
+
       await supabase.storage
         .from(STORAGE_BUCKET)
-        .createSignedUrl(
-          item.storage_path,
-          60 * 10,
-        );
+        .remove([storagePath]);
+
+      setMessage(
+        `자료 정보를 저장하지 못했어요: ${insertError.message}`,
+      );
+      setIsUploading(false);
+      return;
+    }
+
+    setMessage("자료를 업로드했어요.");
+    setIsUploading(false);
+
+    await loadPage();
+  }
+
+  async function openMaterial(material: StudyMaterial) {
+    setOpeningMaterialId(material.id);
+    setMessage("");
+
+    const { data, error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .createSignedUrl(material.storage_path, 60 * 10);
 
     if (error || !data?.signedUrl) {
       console.error(error);
 
       setMessage(
-        `자료를 열지 못했어요: ${
-          error?.message ?? "주소 생성 실패"
+        `파일을 열지 못했어요: ${
+          error?.message ?? "파일 주소 생성 실패"
         }`,
       );
 
-      setIsOpening(null);
+      setOpeningMaterialId(null);
       return;
     }
 
@@ -598,24 +353,21 @@ export default function LibraryPage() {
       "noopener,noreferrer",
     );
 
-    setIsOpening(null);
+    setOpeningMaterialId(null);
   }
 
-  async function downloadMaterial(
-    item: LibraryItem,
-  ) {
+  async function downloadMaterial(material: StudyMaterial) {
     setMessage("");
 
-    const { data, error } =
-      await supabase.storage
-        .from(STORAGE_BUCKET)
-        .download(item.storage_path);
+    const { data, error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .download(material.storage_path);
 
     if (error || !data) {
       console.error(error);
 
       setMessage(
-        `자료를 다운로드하지 못했어요: ${
+        `파일을 다운로드하지 못했어요: ${
           error?.message ?? "파일 생성 실패"
         }`,
       );
@@ -623,36 +375,34 @@ export default function LibraryPage() {
       return;
     }
 
-    const url = URL.createObjectURL(data);
+    const objectUrl = URL.createObjectURL(data);
     const anchor = document.createElement("a");
 
-    anchor.href = url;
-    anchor.download = item.original_name;
+    anchor.href = objectUrl;
+    anchor.download = material.original_name;
+
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
 
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(objectUrl);
   }
 
-  async function deleteMaterial(
-    item: LibraryItem,
-  ) {
+  async function deleteMaterial(material: StudyMaterial) {
     const shouldDelete = window.confirm(
-      `"${item.original_name}" 자료를 삭제할까요?\n연결된 추출 결과와 AI 데이터도 함께 삭제될 수 있어요.`,
+      `"${material.original_name}" 자료를 삭제할까요?\nAI 요약과 문제 데이터도 함께 삭제될 수 있어요.`,
     );
 
     if (!shouldDelete) {
       return;
     }
 
-    setIsDeleting(item.id);
+    setDeletingMaterialId(material.id);
     setMessage("");
 
-    const { error: storageError } =
-      await supabase.storage
-        .from(STORAGE_BUCKET)
-        .remove([item.storage_path]);
+    const { error: storageError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .remove([material.storage_path]);
 
     if (storageError) {
       console.error(storageError);
@@ -661,15 +411,16 @@ export default function LibraryPage() {
         `파일을 삭제하지 못했어요: ${storageError.message}`,
       );
 
-      setIsDeleting(null);
+      setDeletingMaterialId(null);
       return;
     }
 
-    const { error: databaseError } =
-      await supabase
-        .from("study_materials")
-        .delete()
-        .eq("id", item.id);
+    const { error: databaseError } = await supabase
+      .from("study_materials")
+      .delete()
+      .eq("id", material.id)
+      .eq("subject_id", subjectId)
+      .eq("week_id", weekId);
 
     if (databaseError) {
       console.error(databaseError);
@@ -678,173 +429,17 @@ export default function LibraryPage() {
         `자료 정보를 삭제하지 못했어요: ${databaseError.message}`,
       );
 
-      setIsDeleting(null);
+      setDeletingMaterialId(null);
       return;
     }
 
-    setItems((previous) =>
-      previous.filter(
-        (current) => current.id !== item.id,
-      ),
+    setMaterials((previous) =>
+      previous.filter((item) => item.id !== material.id),
     );
 
     setMessage("자료를 삭제했어요.");
-    setIsDeleting(null);
+    setDeletingMaterialId(null);
   }
-
-  function openFilePicker() {
-    fileInputRef.current?.click();
-  }
-
-  async function handleFileSelected(
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) {
-    const file = event.target.files?.[0] ?? null;
-    event.target.value = "";
-
-    if (!file) {
-      return;
-    }
-
-    setPendingFile(file);
-    setMessage("");
-
-    const [subjectsResult, weeksResult] = await Promise.all([
-      supabase
-        .from("study_subjects")
-        .select("id, name, color")
-        .order("name", { ascending: true }),
-      supabase
-        .from("study_weeks")
-        .select("id, subject_id, week_number, title")
-        .order("week_number", { ascending: true }),
-    ]);
-
-    if (subjectsResult.error || weeksResult.error) {
-      console.error(subjectsResult.error ?? weeksResult.error);
-      setMessage(
-        `업로드 정보를 불러오지 못했어요: ${
-          subjectsResult.error?.message ??
-          weeksResult.error?.message ??
-          "알 수 없는 오류"
-        }`,
-      );
-      setPendingFile(null);
-      return;
-    }
-
-    const nextSubjects =
-      (subjectsResult.data ?? []) as Subject[];
-    const nextWeeks =
-      (weeksResult.data ?? []) as StudyWeek[];
-
-    if (nextSubjects.length === 0) {
-      setMessage(
-        "먼저 과목을 만든 뒤 자료를 업로드해 주세요.",
-      );
-      setPendingFile(null);
-      return;
-    }
-
-    setUploadSubjects(nextSubjects);
-    setUploadWeeks(nextWeeks);
-
-    const firstSubjectId = nextSubjects[0].id;
-    const firstWeek = nextWeeks.find(
-      (week) => week.subject_id === firstSubjectId,
-    );
-
-    setUploadSubjectId(firstSubjectId);
-    setUploadWeekId(firstWeek?.id ?? "");
-    setIsUploadModalOpen(true);
-  }
-
-  function closeUploadModal() {
-    if (isUploading) {
-      return;
-    }
-
-    setIsUploadModalOpen(false);
-    setPendingFile(null);
-    setUploadSubjectId("");
-    setUploadWeekId("");
-  }
-
-  async function uploadSelectedFile() {
-    if (!pendingFile || !uploadSubjectId || !uploadWeekId) {
-      setMessage("과목과 주차를 모두 선택해 주세요.");
-      return;
-    }
-
-    setIsUploading(true);
-    setMessage("");
-
-    const safeName = pendingFile.name.replace(
-      /[^a-zA-Z0-9가-힣._-]/g,
-      "_",
-    );
-    const storagePath = `${uploadSubjectId}/${uploadWeekId}/${crypto.randomUUID()}-${safeName}`;
-
-    const { error: storageError } =
-      await supabase.storage
-        .from(STORAGE_BUCKET)
-        .upload(storagePath, pendingFile, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType:
-            pendingFile.type ||
-            "application/octet-stream",
-        });
-
-    if (storageError) {
-      console.error(storageError);
-      setMessage(
-        `파일 업로드에 실패했어요: ${storageError.message}`,
-      );
-      setIsUploading(false);
-      return;
-    }
-
-    const { error: databaseError } = await supabase
-      .from("study_materials")
-      .insert({
-        subject_id: uploadSubjectId,
-        week_id: uploadWeekId,
-        original_name: pendingFile.name,
-        storage_path: storagePath,
-        file_type:
-          pendingFile.type ||
-          getExtension(pendingFile.name) ||
-          null,
-        file_size: pendingFile.size,
-      });
-
-    if (databaseError) {
-      console.error(databaseError);
-
-      await supabase.storage
-        .from(STORAGE_BUCKET)
-        .remove([storagePath]);
-
-      setMessage(
-        `자료 정보를 저장하지 못했어요: ${databaseError.message}`,
-      );
-      setIsUploading(false);
-      return;
-    }
-
-    setIsUploading(false);
-    setIsUploadModalOpen(false);
-    setPendingFile(null);
-    setUploadSubjectId("");
-    setUploadWeekId("");
-    setMessage("자료를 업로드했어요.");
-    await loadLibrary();
-  }
-
-  const selectableUploadWeeks = uploadWeeks.filter(
-    (week) => week.subject_id === uploadSubjectId,
-  );
 
   if (isLoading) {
     return (
@@ -853,176 +448,128 @@ export default function LibraryPage() {
           <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600" />
 
           <p className="mt-4 text-sm text-slate-500">
-            실제 업로드 자료를 불러오는 중이에요.
+            주차 정보를 불러오는 중이에요.
           </p>
         </div>
       </div>
     );
   }
 
+  if (errorMessage || !subject || !week) {
+    return (
+      <div className="rounded-3xl border border-red-100 bg-white p-8 shadow-sm">
+        <p className="font-semibold text-red-500">
+          {errorMessage || "주차 정보를 찾지 못했어요."}
+        </p>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => void loadPage()}
+            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+          >
+            다시 시도
+          </button>
+
+          <Link
+            href={`/subjects/${subjectId}`}
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+          >
+            과목으로 돌아가기
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="mx-auto w-full max-w-7xl">
+    <div className="mx-auto w-full max-w-6xl">
       <input
         ref={fileInputRef}
         type="file"
         className="hidden"
-        onChange={(event) =>
-          void handleFileSelected(event)
-        }
+        onChange={(event) => void handleFileSelected(event)}
       />
 
-      {isUploadModalOpen && pendingFile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold tracking-[0.16em] text-indigo-600">
-                  FILE UPLOAD
-                </p>
-                <h2 className="mt-2 text-2xl font-extrabold text-slate-900">
-                  자료 업로드
-                </h2>
-              </div>
+      <div className="mb-6 flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-500">
+        <Link
+          href="/subjects"
+          className="transition hover:text-slate-900"
+        >
+          과목 목록
+        </Link>
 
-              <button
-                type="button"
-                onClick={closeUploadModal}
-                disabled={isUploading}
-                className="rounded-xl px-3 py-2 text-sm font-bold text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
-              >
-                닫기
-              </button>
-            </div>
+        <span>/</span>
 
-            <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-3">
-              <p className="text-xs font-bold text-slate-400">
-                선택한 파일
+        <Link
+          href={`/subjects/${subject.id}`}
+          className="transition hover:text-slate-900"
+        >
+          {subject.name}
+        </Link>
+
+        <span>/</span>
+
+        <span className="text-slate-900">
+          {week.week_number}주차
+        </span>
+      </div>
+
+      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div
+          className="h-3"
+          style={{
+            backgroundColor: subject.color ?? "#6366f1",
+          }}
+        />
+
+        <div className="p-6 sm:p-8">
+          <div className="flex flex-col justify-between gap-6 md:flex-row md:items-start">
+            <div>
+              <p className="text-sm font-extrabold tracking-[0.16em] text-indigo-600">
+                WEEK {week.week_number}
               </p>
-              <p className="mt-1 break-all text-sm font-semibold text-slate-700">
-                {pendingFile.name}
+
+              <h1 className="mt-3 text-3xl font-extrabold tracking-tight text-slate-900">
+                {week.title}
+              </h1>
+
+              <p className="mt-3 text-sm font-semibold text-slate-500">
+                {subject.name}
               </p>
-              <p className="mt-1 text-xs text-slate-400">
-                {formatFileSize(pendingFile.size)}
-              </p>
             </div>
 
-            <div className="mt-5 space-y-4">
-              <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-700">
-                  과목
-                </span>
-                <select
-                  value={uploadSubjectId}
-                  onChange={(event) => {
-                    const nextSubjectId = event.target.value;
-                    const firstWeek = uploadWeeks.find(
-                      (week) =>
-                        week.subject_id === nextSubjectId,
-                    );
-
-                    setUploadSubjectId(nextSubjectId);
-                    setUploadWeekId(firstWeek?.id ?? "");
-                  }}
-                  disabled={isUploading}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-100"
-                >
-                  {uploadSubjects.map((subject) => (
-                    <option key={subject.id} value={subject.id}>
-                      {subject.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-700">
-                  주차
-                </span>
-                <select
-                  value={uploadWeekId}
-                  onChange={(event) =>
-                    setUploadWeekId(event.target.value)
-                  }
-                  disabled={
-                    isUploading ||
-                    selectableUploadWeeks.length === 0
-                  }
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-100"
-                >
-                  {selectableUploadWeeks.length > 0 ? (
-                    selectableUploadWeeks.map((week) => (
-                      <option key={week.id} value={week.id}>
-                        {week.week_number}주차 · {week.title}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">
-                      먼저 해당 과목에 주차를 만들어 주세요
-                    </option>
-                  )}
-                </select>
-              </label>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={closeUploadModal}
-                disabled={isUploading}
-                className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                onClick={() => void uploadSelectedFile()}
-                disabled={
-                  isUploading ||
-                  !uploadSubjectId ||
-                  !uploadWeekId
-                }
-                className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isUploading ? "업로드 중..." : "업로드"}
-              </button>
-            </div>
+            <button
+              type="button"
+              disabled={isUploading}
+              onClick={() => fileInputRef.current?.click()}
+              className="self-start rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isUploading ? "업로드 중..." : "+ 자료 업로드"}
+            </button>
           </div>
+
+          {(week.start_date || week.end_date) && (
+            <div className="mt-6 rounded-2xl bg-slate-50 p-4 text-sm font-semibold text-slate-600">
+              {formatDate(week.start_date) || "시작일 없음"}
+              {" · "}
+              {formatDate(week.end_date) || "종료일 없음"}
+            </div>
+          )}
+
+          {week.description && (
+            <div className="mt-4 rounded-2xl border border-slate-100 p-5">
+              <p className="text-xs font-bold tracking-wide text-slate-400">
+                주차 메모
+              </p>
+
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-600">
+                {week.description}
+              </p>
+            </div>
+          )}
         </div>
-      )}
-      <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
-        <div>
-          <p className="text-sm font-semibold tracking-[0.18em] text-indigo-600">
-            STUDY LIBRARY
-          </p>
-
-          <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-slate-900">
-            자료실
-          </h1>
-
-          <p className="mt-3 text-sm leading-6 text-slate-500">
-            과목별로 업로드한 실제 자료를 한곳에서
-            검색하고 관리해요.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void loadLibrary()}
-            className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-          >
-            새로고침
-          </button>
-
-          <button
-            type="button"
-            onClick={openFilePicker}
-            className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
-          >
-            + 자료 업로드
-          </button>
-        </div>
-      </header>
+      </section>
 
       {message && (
         <div className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm font-semibold text-indigo-700">
@@ -1030,351 +577,136 @@ export default function LibraryPage() {
         </div>
       )}
 
-      <section className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-bold tracking-wide text-slate-400">
-            전체 자료
-          </p>
+      <section className="mt-8">
+        <div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div>
+            <p className="text-sm font-semibold tracking-[0.16em] text-indigo-600">
+              STUDY MATERIALS
+            </p>
 
-          <p className="mt-3 text-2xl font-extrabold text-slate-900">
-            {items.length}개
-          </p>
-        </article>
-
-        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-bold tracking-wide text-slate-400">
-            텍스트 추출 완료
-          </p>
-
-          <p className="mt-3 text-2xl font-extrabold text-indigo-600">
-            {extractedCount}개
-          </p>
-        </article>
-
-        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-bold tracking-wide text-slate-400">
-            AI 요약 완료
-          </p>
-
-          <p className="mt-3 text-2xl font-extrabold text-emerald-600">
-            {summaryCount}개
-          </p>
-
-          <p className="mt-1 text-xs text-slate-400">
-            문제 생성 {quizCount}개
-          </p>
-        </article>
-
-        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-bold tracking-wide text-slate-400">
-            저장공간
-          </p>
-
-          <p className="mt-3 text-2xl font-extrabold text-rose-500">
-            {formatFileSize(totalStorage)}
-          </p>
-        </article>
-      </section>
-
-      <section className="mt-7 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="grid gap-3 lg:grid-cols-[1fr_190px_160px_180px_160px]">
-          <input
-            value={searchKeyword}
-            onChange={(event) =>
-              setSearchKeyword(
-                event.target.value,
-              )
-            }
-            placeholder="파일명, 과목명, 주차명 검색"
-            className="rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
-          />
-
-          <select
-            value={selectedSubject}
-            onChange={(event) =>
-              setSelectedSubject(
-                event.target.value,
-              )
-            }
-            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
-          >
-            {subjectOptions.map((subject) => (
-              <option
-                key={subject}
-                value={subject}
-              >
-                {subject === "전체"
-                  ? "모든 과목"
-                  : subject}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={selectedFileType}
-            onChange={(event) =>
-              setSelectedFileType(
-                event.target.value,
-              )
-            }
-            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
-          >
-            <option value="전체">
-              모든 파일
-            </option>
-            <option value="PDF">PDF</option>
-            <option value="PPT">PPT</option>
-            <option value="WORD">Word</option>
-            <option value="EXCEL">Excel</option>
-            <option value="IMAGE">이미지</option>
-            <option value="TEXT">텍스트</option>
-            <option value="OTHER">기타</option>
-          </select>
-
-          <select
-            value={selectedStatus}
-            onChange={(event) =>
-              setSelectedStatus(
-                event.target.value,
-              )
-            }
-            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
-          >
-            <option value="전체">
-              모든 처리 상태
-            </option>
-            <option value="AI 요약 완료">
-              AI 요약 완료
-            </option>
-            <option value="텍스트 추출 완료">
-              텍스트 추출 완료
-            </option>
-            <option value="처리 중">
-              처리 중
-            </option>
-            <option value="처리 대기">
-              처리 대기
-            </option>
-            <option value="처리 실패">
-              처리 실패
-            </option>
-          </select>
-
-          <select
-            value={sortOption}
-            onChange={(event) =>
-              setSortOption(event.target.value)
-            }
-            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
-          >
-            <option value="최신순">
-              최신순
-            </option>
-            <option value="오래된순">
-              오래된순
-            </option>
-            <option value="이름순">
-              이름순
-            </option>
-            <option value="용량 큰 순">
-              용량 큰 순
-            </option>
-          </select>
-        </div>
-
-        <p className="mt-4 text-sm text-slate-400">
-          검색 결과 {filteredItems.length}개
-        </p>
-      </section>
-
-      <section className="mt-6">
-        {filteredItems.length > 0 ? (
-          <div className="space-y-4">
-            {filteredItems.map((item) => {
-              const fileCategory =
-                getFileCategory(
-                  item.original_name,
-                );
-
-              return (
-                <article
-                  key={item.id}
-                  className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-indigo-200 hover:shadow-md"
-                >
-                  <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className={[
-                            "rounded-lg px-2.5 py-1 text-xs font-extrabold",
-                            getFileTypeStyle(
-                              fileCategory,
-                            ),
-                          ].join(" ")}
-                        >
-                          {fileCategory}
-                        </span>
-
-                        <span
-                          className={[
-                            "rounded-full px-3 py-1 text-xs font-bold",
-                            getAiStatusStyle(item),
-                          ].join(" ")}
-                        >
-                          {getAiStatusLabel(item)}
-                        </span>
-
-                        {item.hasQuiz && (
-                          <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700">
-                            문제 생성 완료
-                          </span>
-                        )}
-                      </div>
-
-                      <h2 className="mt-4 break-words text-lg font-extrabold leading-7 text-slate-900">
-                        {item.original_name}
-                      </h2>
-
-                      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-xs font-semibold text-slate-400">
-                        <span
-                          className="inline-flex items-center gap-2"
-                          style={{
-                            color:
-                              item.subjectColor,
-                          }}
-                        >
-                          <span
-                            className="h-2.5 w-2.5 rounded-full"
-                            style={{
-                              backgroundColor:
-                                item.subjectColor,
-                            }}
-                          />
-
-                          {item.subjectName}
-                        </span>
-
-                        <span>·</span>
-
-                        <span>
-                          {item.weekNumber
-                            ? `${item.weekNumber}주차`
-                            : "주차 미상"}
-                        </span>
-
-                        <span>·</span>
-
-                        <span>{item.weekTitle}</span>
-
-                        <span>·</span>
-
-                        <span>
-                          {formatFileSize(
-                            item.file_size,
-                          )}
-                        </span>
-
-                        <span>·</span>
-
-                        <span>
-                          {formatDate(
-                            item.created_at,
-                          )}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex shrink-0 flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={
-                          isOpening === item.id
-                        }
-                        onClick={() =>
-                          void openMaterial(item)
-                        }
-                        className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:opacity-50"
-                      >
-                        {isOpening === item.id
-                          ? "여는 중..."
-                          : "파일 열기"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void downloadMaterial(
-                            item,
-                          )
-                        }
-                        className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-                      >
-                        다운로드
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-100 pt-5">
-                    <Link
-                      href={`/subjects/${item.subject_id}/weeks/${item.week_id}`}
-                      className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-                    >
-                      과목·주차로 이동
-                    </Link>
-
-                    <Link
-                      href={`/materials/${item.id}`}
-                      className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                    >
-                      AI 학습 화면
-                    </Link>
-
-                    <Link
-                      href={`/materials/${item.id}/quiz`}
-                      className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
-                    >
-                      문제 풀기
-                    </Link>
-
-                    <button
-                      type="button"
-                      disabled={
-                        isDeleting === item.id
-                      }
-                      onClick={() =>
-                        void deleteMaterial(item)
-                      }
-                      className="rounded-xl border border-red-100 bg-white px-4 py-2.5 text-sm font-semibold text-red-500 transition hover:bg-red-50 disabled:opacity-50"
-                    >
-                      {isDeleting === item.id
-                        ? "삭제 중..."
-                        : "삭제"}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
-            <p className="text-4xl">🗂️</p>
-
-            <h2 className="mt-4 text-lg font-extrabold text-slate-800">
-              표시할 자료가 없어요.
+            <h2 className="mt-2 text-2xl font-extrabold text-slate-900">
+              학습 자료
             </h2>
 
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              과목 주차에서 자료를 업로드하거나
-              검색 조건을 변경해 보세요.
+            <p className="mt-2 text-sm text-slate-500">
+              총 {materials.length}개의 자료가 등록되어 있어요.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void loadPage()}
+            className="self-start rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+          >
+            새로고침
+          </button>
+        </div>
+
+        {materials.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+            <p className="text-4xl">📚</p>
+
+            <h3 className="mt-4 text-lg font-extrabold text-slate-800">
+              아직 등록된 자료가 없어요.
+            </h3>
+
+            <p className="mt-2 text-sm text-slate-500">
+              강의 자료를 업로드하면 AI 요약과 문제 생성을
+              사용할 수 있어요.
             </p>
 
             <button
               type="button"
-              onClick={openFilePicker}
-              className="mt-5 inline-flex rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
+              disabled={isUploading}
+              onClick={() => fileInputRef.current?.click()}
+              className="mt-5 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:opacity-50"
             >
               자료 업로드하기
             </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {materials.map((material) => (
+              <article
+                key={material.id}
+                className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-indigo-200 hover:shadow-md"
+              >
+                <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
+                  <div className="min-w-0 flex-1">
+                    <span
+                      className={[
+                        "inline-flex rounded-lg px-2.5 py-1 text-xs font-extrabold",
+                        getFileLabelClass(material.original_name),
+                      ].join(" ")}
+                    >
+                      {getFileLabel(material.original_name)}
+                    </span>
+
+                    <h3 className="mt-4 break-words text-lg font-extrabold text-slate-900">
+                      {material.original_name}
+                    </h3>
+
+                    <div className="mt-3 flex flex-wrap gap-x-2 gap-y-1 text-xs font-semibold text-slate-400">
+                      <span>
+                        {formatFileSize(material.file_size)}
+                      </span>
+
+                      <span>·</span>
+
+                      <span>{formatDate(material.created_at)}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={openingMaterialId === material.id}
+                      onClick={() => void openMaterial(material)}
+                      className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      {openingMaterialId === material.id
+                        ? "여는 중..."
+                        : "파일 열기"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void downloadMaterial(material)}
+                      className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                    >
+                      다운로드
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-100 pt-5">
+                  <Link
+                    href={`/materials/${material.id}`}
+                    className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                  >
+                    AI 문서 분석
+                  </Link>
+
+                  <Link
+                    href={`/materials/${material.id}/quiz`}
+                    className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
+                  >
+                    문제 풀기
+                  </Link>
+
+                  <button
+                    type="button"
+                    disabled={deletingMaterialId === material.id}
+                    onClick={() => void deleteMaterial(material)}
+                    className="rounded-xl border border-red-100 px-4 py-2.5 text-sm font-semibold text-red-500 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {deletingMaterialId === material.id
+                      ? "삭제 중..."
+                      : "삭제"}
+                  </button>
+                </div>
+              </article>
+            ))}
           </div>
         )}
       </section>
