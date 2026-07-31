@@ -709,8 +709,8 @@ export default function LibraryPage() {
           </h1>
 
           <p className="mt-3 text-sm leading-6 text-slate-500">
-            과목별로 업로드한 실제 자료를 한곳에서
-            검색하고 관리해요.
+            과목별로 업로드한 자료를 한곳에서
+            검색하고 관리할 수 있어요.
           </p>
         </div>
 
@@ -727,7 +727,7 @@ export default function LibraryPage() {
             href="/subjects"
             className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
           >
-            + 자료 업로드
+            + 과목으로 이동
           </Link>
         </div>
       </header>
@@ -1080,7 +1080,7 @@ export default function LibraryPage() {
               href="/subjects"
               className="mt-5 inline-flex rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white"
             >
-              자료 업로드하기
+              과목에서 자료 업로드하기
             </Link>
           </div>
         )}
