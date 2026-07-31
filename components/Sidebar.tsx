@@ -38,9 +38,9 @@ const menuItems: MenuItem[] = [
     icon: "🤖",
   },
   {
-  name: "질문 모음",
-  href: "/questions",
-  icon: "?",
+    name: "질문 모음",
+    href: "/questions",
+    icon: "?",
   },
   {
     name: "오답노트",
@@ -48,10 +48,9 @@ const menuItems: MenuItem[] = [
     icon: "!",
   },
   {
-    
-  name: "암기카드",
-  href: "/flashcards",
-  icon: "▣",
+    name: "암기카드",
+    href: "/flashcards",
+    icon: "▣",
   },
   {
     name: "학점 관리",
@@ -65,8 +64,8 @@ const menuItems: MenuItem[] = [
   },
   {
     name: "문제 풀이",
-    href: "/questions",
-    icon: "?",
+    href: "/quiz",
+    icon: "✓",
   },
   {
     name: "자료실",
@@ -109,11 +108,17 @@ export default function Sidebar({
       <div
         className={[
           "flex h-20 items-center border-b border-slate-100",
-          isCollapsed ? "justify-center px-3" : "justify-between px-5",
+          isCollapsed
+            ? "justify-center px-3"
+            : "justify-between px-5",
         ].join(" ")}
       >
         {!isCollapsed && (
-          <Link href="/" onClick={onCloseMobile} className="min-w-0">
+          <Link
+            href="/"
+            onClick={onCloseMobile}
+            className="min-w-0"
+          >
             <p className="truncate text-base font-extrabold tracking-tight text-slate-900">
               Study Archive
             </p>
@@ -127,7 +132,11 @@ export default function Sidebar({
         <button
           type="button"
           onClick={onToggleCollapse}
-          aria-label={isCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+          aria-label={
+            isCollapsed
+              ? "사이드바 펼치기"
+              : "사이드바 접기"
+          }
           className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-500 shadow-sm transition hover:bg-slate-50 hover:text-slate-900 lg:flex"
         >
           {isCollapsed ? "›" : "‹"}
@@ -149,11 +158,15 @@ export default function Sidebar({
             const active = isActivePath(item.href);
 
             return (
-              <li key={item.href}>
+              <li key={`${item.name}-${item.href}`}>
                 <Link
                   href={item.href}
                   onClick={onCloseMobile}
-                  title={isCollapsed ? item.name : undefined}
+                  title={
+                    isCollapsed
+                      ? item.name
+                      : undefined
+                  }
                   className={[
                     "group flex min-h-12 items-center rounded-2xl text-sm font-semibold transition",
                     isCollapsed
@@ -176,7 +189,9 @@ export default function Sidebar({
                   </span>
 
                   {!isCollapsed && (
-                    <span className="truncate">{item.name}</span>
+                    <span className="truncate">
+                      {item.name}
+                    </span>
                   )}
                 </Link>
               </li>
@@ -189,7 +204,9 @@ export default function Sidebar({
         <div
           className={[
             "rounded-2xl bg-slate-50",
-            isCollapsed ? "p-2 text-center" : "p-4",
+            isCollapsed
+              ? "p-2 text-center"
+              : "p-4",
           ].join(" ")}
         >
           {isCollapsed ? (
@@ -206,7 +223,8 @@ export default function Sidebar({
               </p>
 
               <p className="mt-1 text-xs leading-5 text-slate-400">
-                과목과 시험 자료를 한곳에서 관리해요.
+                과목과 시험 자료를 한곳에서
+                관리해요.
               </p>
             </>
           )}
