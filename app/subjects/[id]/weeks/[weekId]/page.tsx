@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -280,6 +281,15 @@ export default function LibraryPage() {
     useState("최신순");
 
   const [message, setMessage] = useState("");
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [uploadSubjectId, setUploadSubjectId] = useState("");
+  const [uploadWeekId, setUploadWeekId] = useState("");
+  const [uploadSubjects, setUploadSubjects] = useState<Subject[]>([]);
+  const [uploadWeeks, setUploadWeeks] = useState<StudyWeek[]>([]);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   const loadLibrary = useCallback(async () => {
     setIsLoading(true);
@@ -682,6 +692,160 @@ export default function LibraryPage() {
     setIsDeleting(null);
   }
 
+  function openFilePicker() {
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileSelected(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    setPendingFile(file);
+    setMessage("");
+
+    const [subjectsResult, weeksResult] = await Promise.all([
+      supabase
+        .from("study_subjects")
+        .select("id, name, color")
+        .order("name", { ascending: true }),
+      supabase
+        .from("study_weeks")
+        .select("id, subject_id, week_number, title")
+        .order("week_number", { ascending: true }),
+    ]);
+
+    if (subjectsResult.error || weeksResult.error) {
+      console.error(subjectsResult.error ?? weeksResult.error);
+      setMessage(
+        `업로드 정보를 불러오지 못했어요: ${
+          subjectsResult.error?.message ??
+          weeksResult.error?.message ??
+          "알 수 없는 오류"
+        }`,
+      );
+      setPendingFile(null);
+      return;
+    }
+
+    const nextSubjects =
+      (subjectsResult.data ?? []) as Subject[];
+    const nextWeeks =
+      (weeksResult.data ?? []) as StudyWeek[];
+
+    if (nextSubjects.length === 0) {
+      setMessage(
+        "먼저 과목을 만든 뒤 자료를 업로드해 주세요.",
+      );
+      setPendingFile(null);
+      return;
+    }
+
+    setUploadSubjects(nextSubjects);
+    setUploadWeeks(nextWeeks);
+
+    const firstSubjectId = nextSubjects[0].id;
+    const firstWeek = nextWeeks.find(
+      (week) => week.subject_id === firstSubjectId,
+    );
+
+    setUploadSubjectId(firstSubjectId);
+    setUploadWeekId(firstWeek?.id ?? "");
+    setIsUploadModalOpen(true);
+  }
+
+  function closeUploadModal() {
+    if (isUploading) {
+      return;
+    }
+
+    setIsUploadModalOpen(false);
+    setPendingFile(null);
+    setUploadSubjectId("");
+    setUploadWeekId("");
+  }
+
+  async function uploadSelectedFile() {
+    if (!pendingFile || !uploadSubjectId || !uploadWeekId) {
+      setMessage("과목과 주차를 모두 선택해 주세요.");
+      return;
+    }
+
+    setIsUploading(true);
+    setMessage("");
+
+    const safeName = pendingFile.name.replace(
+      /[^a-zA-Z0-9가-힣._-]/g,
+      "_",
+    );
+    const storagePath = `${uploadSubjectId}/${uploadWeekId}/${crypto.randomUUID()}-${safeName}`;
+
+    const { error: storageError } =
+      await supabase.storage
+        .from(STORAGE_BUCKET)
+        .upload(storagePath, pendingFile, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType:
+            pendingFile.type ||
+            "application/octet-stream",
+        });
+
+    if (storageError) {
+      console.error(storageError);
+      setMessage(
+        `파일 업로드에 실패했어요: ${storageError.message}`,
+      );
+      setIsUploading(false);
+      return;
+    }
+
+    const { error: databaseError } = await supabase
+      .from("study_materials")
+      .insert({
+        subject_id: uploadSubjectId,
+        week_id: uploadWeekId,
+        original_name: pendingFile.name,
+        storage_path: storagePath,
+        file_type:
+          pendingFile.type ||
+          getExtension(pendingFile.name) ||
+          null,
+        file_size: pendingFile.size,
+      });
+
+    if (databaseError) {
+      console.error(databaseError);
+
+      await supabase.storage
+        .from(STORAGE_BUCKET)
+        .remove([storagePath]);
+
+      setMessage(
+        `자료 정보를 저장하지 못했어요: ${databaseError.message}`,
+      );
+      setIsUploading(false);
+      return;
+    }
+
+    setIsUploading(false);
+    setIsUploadModalOpen(false);
+    setPendingFile(null);
+    setUploadSubjectId("");
+    setUploadWeekId("");
+    setMessage("자료를 업로드했어요.");
+    await loadLibrary();
+  }
+
+  const selectableUploadWeeks = uploadWeeks.filter(
+    (week) => week.subject_id === uploadSubjectId,
+  );
+
   if (isLoading) {
     return (
       <div className="flex min-h-[500px] items-center justify-center">
@@ -698,6 +862,133 @@ export default function LibraryPage() {
 
   return (
     <div className="mx-auto w-full max-w-7xl">
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(event) =>
+          void handleFileSelected(event)
+        }
+      />
+
+      {isUploadModalOpen && pendingFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold tracking-[0.16em] text-indigo-600">
+                  FILE UPLOAD
+                </p>
+                <h2 className="mt-2 text-2xl font-extrabold text-slate-900">
+                  자료 업로드
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeUploadModal}
+                disabled={isUploading}
+                className="rounded-xl px-3 py-2 text-sm font-bold text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+              >
+                닫기
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-3">
+              <p className="text-xs font-bold text-slate-400">
+                선택한 파일
+              </p>
+              <p className="mt-1 break-all text-sm font-semibold text-slate-700">
+                {pendingFile.name}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {formatFileSize(pendingFile.size)}
+              </p>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  과목
+                </span>
+                <select
+                  value={uploadSubjectId}
+                  onChange={(event) => {
+                    const nextSubjectId = event.target.value;
+                    const firstWeek = uploadWeeks.find(
+                      (week) =>
+                        week.subject_id === nextSubjectId,
+                    );
+
+                    setUploadSubjectId(nextSubjectId);
+                    setUploadWeekId(firstWeek?.id ?? "");
+                  }}
+                  disabled={isUploading}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-100"
+                >
+                  {uploadSubjects.map((subject) => (
+                    <option key={subject.id} value={subject.id}>
+                      {subject.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  주차
+                </span>
+                <select
+                  value={uploadWeekId}
+                  onChange={(event) =>
+                    setUploadWeekId(event.target.value)
+                  }
+                  disabled={
+                    isUploading ||
+                    selectableUploadWeeks.length === 0
+                  }
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-100"
+                >
+                  {selectableUploadWeeks.length > 0 ? (
+                    selectableUploadWeeks.map((week) => (
+                      <option key={week.id} value={week.id}>
+                        {week.week_number}주차 · {week.title}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">
+                      먼저 해당 과목에 주차를 만들어 주세요
+                    </option>
+                  )}
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeUploadModal}
+                disabled={isUploading}
+                className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => void uploadSelectedFile()}
+                disabled={
+                  isUploading ||
+                  !uploadSubjectId ||
+                  !uploadWeekId
+                }
+                className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isUploading ? "업로드 중..." : "업로드"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
         <div>
           <p className="text-sm font-semibold tracking-[0.18em] text-indigo-600">
@@ -709,8 +1000,8 @@ export default function LibraryPage() {
           </h1>
 
           <p className="mt-3 text-sm leading-6 text-slate-500">
-            과목별로 업로드한 자료를 한곳에서
-            검색하고 관리할 수 있어요.
+            과목별로 업로드한 실제 자료를 한곳에서
+            검색하고 관리해요.
           </p>
         </div>
 
@@ -723,12 +1014,13 @@ export default function LibraryPage() {
             새로고침
           </button>
 
-          <Link
-            href="/subjects"
+          <button
+            type="button"
+            onClick={openFilePicker}
             className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
           >
-            + 과목으로 이동
-          </Link>
+            + 자료 업로드
+          </button>
         </div>
       </header>
 
@@ -1076,12 +1368,13 @@ export default function LibraryPage() {
               검색 조건을 변경해 보세요.
             </p>
 
-            <Link
-              href="/subjects"
-              className="mt-5 inline-flex rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white"
+            <button
+              type="button"
+              onClick={openFilePicker}
+              className="mt-5 inline-flex rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
             >
-              과목에서 자료 업로드하기
-            </Link>
+              자료 업로드하기
+            </button>
           </div>
         )}
       </section>
