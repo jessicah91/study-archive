@@ -4,6 +4,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 type SummaryResult = {
+  documentType:
+    | "syllabus"
+    | "lecture"
+    | "assignment"
+    | "exam_notice"
+    | "other";
+
   title: string;
   overview: string;
   keyPoints: string[];
@@ -186,7 +193,7 @@ export default function MaterialStudySummary({
 
         <div>
           <h2 className="text-lg font-bold text-slate-900">
-            AI 학습 요약
+            AI 문서 요약
           </h2>
 
           <p className="mt-1 text-sm text-slate-500">
@@ -203,11 +210,12 @@ export default function MaterialStudySummary({
     <section className="rounded-2xl border border-slate-200 bg-white p-6">
       <div className="mb-4">
         <h2 className="text-lg font-bold text-slate-900">
-          AI 학습 요약
+          AI 문서 요약
         </h2>
 
         <p className="mt-1 text-sm text-slate-500">
-          업로드한 학습 자료를 시험 대비용으로 정리합니다.
+          업로드한 문서를 AI가 자동으로 분석합니다.
+          강의계획서와 일반 강의자료를 자동으로 구분합니다.
         </p>
       </div>
 
@@ -236,7 +244,7 @@ export default function MaterialStudySummary({
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-              AI 학습 요약
+              AI 문서 요약
             </span>
 
             {source && (
@@ -251,6 +259,20 @@ export default function MaterialStudySummary({
           <h2 className="text-2xl font-bold text-slate-900">
             {summary.title}
           </h2>
+
+          <div className="mt-3">
+  <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+    {summary.documentType === "syllabus"
+      ? "📚 강의계획서"
+      : summary.documentType === "lecture"
+      ? "📖 강의자료"
+      : summary.documentType === "assignment"
+      ? "📝 과제 안내"
+      : summary.documentType === "exam_notice"
+      ? "🧾 시험 안내"
+      : "📄 기타 문서"}
+  </span>
+</div>
 
           {updatedAt && (
             <p className="mt-2 text-xs text-slate-400">
@@ -293,8 +315,11 @@ export default function MaterialStudySummary({
       </div>
 
       <div>
-        <h3 className="mb-3 font-bold text-slate-900">핵심 내용</h3>
-
+<h3 className="mb-3 font-bold text-slate-900">
+  {summary.documentType === "syllabus"
+    ? "📚 과목 정보"
+    : "핵심 내용"}
+</h3>
         {summary.keyPoints.length > 0 ? (
           <ol className="space-y-3">
             {summary.keyPoints.map((point, index) => (
@@ -318,7 +343,11 @@ export default function MaterialStudySummary({
       </div>
 
       <div>
-        <h3 className="mb-3 font-bold text-slate-900">핵심 개념</h3>
+        <h3 className="mb-3 font-bold text-slate-900">
+  {summary.documentType === "syllabus"
+    ? "📋 평가 방식"
+    : "핵심 개념"}
+</h3>
 
         {summary.keyConcepts.length > 0 ? (
           <div className="grid gap-3 md:grid-cols-2">
@@ -341,7 +370,11 @@ export default function MaterialStudySummary({
       </div>
 
       <div>
-        <h3 className="mb-3 font-bold text-slate-900">시험 포인트</h3>
+        <h3 className="mb-3 font-bold text-slate-900">
+  {summary.documentType === "syllabus"
+    ? "📅 주요 일정"
+    : "시험 포인트"}
+</h3>
 
         {summary.examPoints.length > 0 ? (
           <div className="space-y-3">
@@ -368,8 +401,11 @@ export default function MaterialStudySummary({
       </div>
 
       <div>
-        <h3 className="mb-3 font-bold text-slate-900">복습 문제</h3>
-
+        <h3 className="mb-3 font-bold text-slate-900">
+  {summary.documentType === "syllabus"
+    ? "📌 과제 · 출결"
+    : "복습 문제"}
+</h3>
         {summary.reviewQuestions.length > 0 ? (
           <div className="space-y-3">
             {summary.reviewQuestions.map((question, index) => (
