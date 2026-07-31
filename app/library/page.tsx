@@ -1,5 +1,6 @@
 "use client";
 
+import MaterialExtractButton from "@/components/MaterialExtractButton";
 import Link from "next/link";
 import {
   useCallback,
@@ -1076,30 +1077,16 @@ export default function LibraryPage() {
 
                     <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-100 pt-5">
                       <Link
-                        href={`/subjects/${item.subject_id}/weeks/${item.week_id}`}
-                        className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-                      >
-                        과목·주차로 이동
-                      </Link>
+  href={`/subjects/${item.subject_id}/weeks/${item.week_id}`}
+  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+>
+  과목·주차로 이동
+</Link>
 
-                      {item.extractedTextLength >
-                      0 ? (
-                        <Link
-                          href={`/subjects/${item.subject_id}/weeks/${item.week_id}#materials`}
-                          className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                        >
-                          {item.hasSummary
-                            ? "AI 요약 보기"
-                            : "AI 요약 만들기"}
-                        </Link>
-                      ) : (
-                        <Link
-                          href={`/subjects/${item.subject_id}/weeks/${item.week_id}#materials`}
-                          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 transition hover:bg-amber-100"
-                        >
-                          텍스트 추출하기
-                        </Link>
-                      )}
+<MaterialExtractButton
+  materialId={item.id}
+  hasExtractedText={item.extractedTextLength > 0}
+/>
 
                       <button
                         type="button"
