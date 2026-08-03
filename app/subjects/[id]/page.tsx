@@ -883,12 +883,12 @@ export default function SubjectDetailPage() {
                 )}
 
                 <div className="mt-5 grid grid-cols-3 gap-2">
-                  <Link
+                  <a
                     href={`/subjects/${subject.id}/weeks/${week.id}`}
                     className="flex items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
                   >
                     열기
-                  </Link>
+                  </a>
 
                   <button
                     type="button"
