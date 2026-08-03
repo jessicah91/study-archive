@@ -15,7 +15,7 @@ type GradeCourse = {
   id: string;
   semester_id: string;
   course_name: string;
-  category: "전공" | "교양" | "기타";
+  category: "전필" | "전선" | "부전" | "교필" | "교핵" | "기타";
   credits: number;
   letter_grade: string;
   grade_point: number | null;
@@ -27,7 +27,7 @@ type GradeCourse = {
 type CourseForm = {
   semester_id: string;
   course_name: string;
-  category: "전공" | "교양" | "기타";
+  category: "전필" | "전선" | "부전" | "교필" | "교핵" | "기타";
   credits: number;
   letter_grade: string;
   is_major: boolean;
@@ -37,12 +37,20 @@ type CourseForm = {
 const GRADE_POINTS: Record<string, number | null> = {
   "A+": 4.3,
   A0: 4.0,
+  "A-": 3.7,
+
   "B+": 3.3,
   B0: 3.0,
+  "B-": 2.7,
+
   "C+": 2.3,
   C0: 2.0,
+  "C-": 1.7,
+
   "D+": 1.3,
   D0: 1.0,
+  "D-": 0.7,
+
   F: 0,
   P: null,
   NP: null,
@@ -57,7 +65,7 @@ const EMPTY_SEMESTER = {
 const EMPTY_COURSE: CourseForm = {
   semester_id: "",
   course_name: "",
-  category: "전공",
+  category: "전필",
   credits: 3,
   letter_grade: "A+",
   is_major: true,
@@ -433,18 +441,24 @@ export default function GradesPage() {
           <select
             value={courseForm.category}
             onChange={(event) => {
-              const category = event.target.value as "전공" | "교양" | "기타";
+              const category = event.target.value as "전필" | "전선" | "부전" | "교필" | "교핵" | "기타";
               setCourseForm((previous) => ({
                 ...previous,
                 category,
-                is_major: category === "전공",
+                is_major: category === "전필" || 
+                category === "전선" || 
+                category === "부전",
               }));
             }}
             className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
           >
-            <option value="전공">전공</option>
-            <option value="교양">교양</option>
-            <option value="기타">기타</option>
+            <option value="전필">전공필수</option>
+<option value="전선">전공선택</option>
+<option value="부전">부전공</option>
+<option value="교필">교양필수</option>
+<option value="교핵">핵심교양</option>
+<option value="일선">일반선택</option>
+<option value="기타">기타</option>
           </select>
 
           <input
