@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type QuizQuestion = {
   id: number;
@@ -18,7 +18,8 @@ type QuizData = {
 };
 
 type QuizResponse = {
-  quiz?: QuizData;
+  quizSetId?: string | null;
+  quiz?: QuizData | null;
   error?: string;
   detail?: string;
 };
@@ -27,69 +28,82 @@ export default function MaterialQuizPage() {
   const params = useParams<{ materialId: string }>();
   const materialId = params.materialId;
 
+  const [quizSetId, setQuizSetId] = useState<string | null>(null);
   const [quiz, setQuiz] = useState<QuizData | null>(null);
   const [answers, setAnswers] = useState<Record<number, number>>({});
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isSavingResult, setIsSavingResult] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
 
-  async function generateQuiz() {
-    if (!materialId) {
-      setErrorMessage("학습 자료 ID가 없습니다.");
-      return;
+  useEffect(() => {
+    async function loadSavedQuiz() {
+      if (!materialId) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/materials/quiz?materialId=${encodeURIComponent(materialId)}`,
+          { cache: "no-store" },
+        );
+
+        const result = (await response.json()) as QuizResponse;
+
+        if (!response.ok) {
+          throw new Error(result.error ?? "저장된 문제를 불러오지 못했어요.");
+        }
+
+        setQuizSetId(result.quizSetId ?? null);
+        setQuiz(result.quiz ?? null);
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error ? error.message : "문제를 불러오지 못했어요.",
+        );
+      } finally {
+        setIsLoading(false);
+      }
     }
 
+    void loadSavedQuiz();
+  }, [materialId]);
+
+  async function generateQuiz(forceRegenerate = false) {
     try {
       setIsLoading(true);
       setErrorMessage("");
-      setQuiz(null);
+      setSaveMessage("");
       setAnswers({});
       setIsSubmitted(false);
 
       const response = await fetch("/api/materials/quiz", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           materialId,
+          forceRegenerate,
         }),
       });
 
-      const contentType = response.headers.get("content-type");
-
-      if (!contentType?.includes("application/json")) {
-        const rawResponse = await response.text();
-
-        console.error("JSON이 아닌 서버 응답:", rawResponse);
-
-        throw new Error(
-          `서버 응답을 읽지 못했습니다. 상태 코드: ${response.status}`
-        );
-      }
-
       const result = (await response.json()) as QuizResponse;
 
-      if (!response.ok) {
+      if (!response.ok || !result.quiz || !result.quizSetId) {
         throw new Error(
           result.detail
             ? `${result.error ?? "문제 생성 실패"}: ${result.detail}`
-            : result.error ?? "AI 문제 생성에 실패했습니다."
+            : result.error ?? "AI 문제 생성에 실패했습니다.",
         );
       }
 
-      if (!result.quiz) {
-        throw new Error("서버 응답에 생성된 문제가 없습니다.");
-      }
-
+      setQuizSetId(result.quizSetId);
       setQuiz(result.quiz);
     } catch (error) {
-      console.error("AI 문제 생성 오류:", error);
-
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "문제 생성 중 오류가 발생했습니다."
+          : "문제 생성 중 오류가 발생했습니다.",
       );
     } finally {
       setIsLoading(false);
@@ -97,9 +111,7 @@ export default function MaterialQuizPage() {
   }
 
   function selectAnswer(questionIndex: number, optionIndex: number) {
-    if (isSubmitted) {
-      return;
-    }
+    if (isSubmitted) return;
 
     setAnswers((previous) => ({
       ...previous,
@@ -107,64 +119,85 @@ export default function MaterialQuizPage() {
     }));
   }
 
-  function submitQuiz() {
-    if (!quiz) {
-      return;
-    }
+  async function submitQuiz() {
+    if (!quiz || !quizSetId) return;
 
     const unansweredCount = quiz.questions.filter(
-      (_, questionIndex) => answers[questionIndex] === undefined
+      (_, index) => answers[index] === undefined,
     ).length;
 
     if (unansweredCount > 0) {
-      setErrorMessage(
-        `아직 선택하지 않은 문제가 ${unansweredCount}개 있어요.`
-      );
+      setErrorMessage(`아직 선택하지 않은 문제가 ${unansweredCount}개 있어요.`);
       return;
     }
 
     setErrorMessage("");
-    setIsSubmitted(true);
-  }
+    setSaveMessage("");
+    setIsSavingResult(true);
 
-  function calculateScore() {
-    if (!quiz) {
-      return 0;
+    try {
+      const response = await fetch("/api/quiz/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quizSetId,
+          answers,
+        }),
+      });
+
+      const result = (await response.json()) as {
+        error?: string;
+        score?: number;
+        totalQuestions?: number;
+        wrongCount?: number;
+      };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "풀이 결과를 저장하지 못했어요.");
+      }
+
+      setIsSubmitted(true);
+      setSaveMessage(
+        `풀이 기록을 저장했어요. 틀린 문제 ${result.wrongCount ?? 0}개는 오답노트에 자동 등록됐어요.`,
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "풀이 결과 저장에 실패했어요.",
+      );
+    } finally {
+      setIsSavingResult(false);
     }
-
-    return quiz.questions.reduce((score, question, questionIndex) => {
-      return answers[questionIndex] === question.answerIndex
-        ? score + 1
-        : score;
-    }, 0);
   }
 
-  function restartQuiz() {
-    setAnswers({});
-    setIsSubmitted(false);
-    setErrorMessage("");
-  }
+  const score =
+    quiz?.questions.reduce(
+      (sum, question, index) =>
+        answers[index] === question.answerIndex ? sum + 1 : sum,
+      0,
+    ) ?? 0;
 
-  const score = calculateScore();
+  if (isLoading) {
+    return (
+      <main className="flex min-h-[60vh] items-center justify-center">
+        <p className="text-sm text-slate-500">문제를 불러오는 중...</p>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10">
       <div className="mx-auto max-w-3xl">
         <header className="mb-8">
           <Link
-            href="/subjects"
-            className="text-sm font-medium text-slate-500 transition hover:text-slate-900"
+            href="/quiz"
+            className="text-sm font-medium text-slate-500 hover:text-slate-900"
           >
-            ← 과목 목록으로
+            ← 문제 풀이 목록으로
           </Link>
 
           <h1 className="mt-4 text-3xl font-bold text-slate-900">
             AI 문제 풀기
           </h1>
-
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            업로드한 학습 자료를 바탕으로 객관식 문제를 생성합니다.
-          </p>
         </header>
 
         {errorMessage && (
@@ -173,27 +206,25 @@ export default function MaterialQuizPage() {
           </div>
         )}
 
+        {saveMessage && (
+          <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+            {saveMessage}
+          </div>
+        )}
+
         {!quiz && (
           <section className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
             <div className="text-5xl">📝</div>
-
             <h2 className="mt-4 text-xl font-bold text-slate-900">
               학습자료 문제를 만들어볼까요?
             </h2>
 
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              학습 자료에서 중요한 내용을 골라 객관식 5문제를 만듭니다.
-            </p>
-
             <button
               type="button"
-              onClick={generateQuiz}
-              disabled={isLoading}
-              className="mt-6 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void generateQuiz(false)}
+              className="mt-6 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white"
             >
-              {isLoading
-                ? "AI가 문제를 만들고 있어요..."
-                : "AI 문제 생성하기"}
+              AI 문제 생성하기
             </button>
           </section>
         )}
@@ -212,19 +243,19 @@ export default function MaterialQuizPage() {
                   </h2>
                 </div>
 
-                {!isSubmitted && (
-                  <span className="text-sm text-slate-500">
-                    선택 완료 {Object.keys(answers).length}/
-                    {quiz.questions.length}
-                  </span>
-                )}
+                <button
+                  type="button"
+                  onClick={() => void generateQuiz(true)}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600"
+                >
+                  새 문제 생성
+                </button>
               </div>
             </section>
 
             {quiz.questions.map((question, questionIndex) => {
               const selectedAnswer = answers[questionIndex];
-              const isCorrect =
-                selectedAnswer === question.answerIndex;
+              const isCorrect = selectedAnswer === question.answerIndex;
 
               return (
                 <section
@@ -243,31 +274,22 @@ export default function MaterialQuizPage() {
 
                   <div className="mt-5 space-y-3">
                     {question.options.map((option, optionIndex) => {
-                      const isSelected =
-                        selectedAnswer === optionIndex;
-                      const isAnswer =
-                        question.answerIndex === optionIndex;
+                      const isSelected = selectedAnswer === optionIndex;
+                      const isAnswer = question.answerIndex === optionIndex;
 
                       let optionClass =
                         "border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50";
 
                       if (isSelected && !isSubmitted) {
-                        optionClass =
-                          "border-indigo-500 bg-indigo-50";
+                        optionClass = "border-indigo-500 bg-indigo-50";
                       }
 
                       if (isSubmitted && isAnswer) {
-                        optionClass =
-                          "border-emerald-500 bg-emerald-50";
+                        optionClass = "border-emerald-500 bg-emerald-50";
                       }
 
-                      if (
-                        isSubmitted &&
-                        isSelected &&
-                        !isAnswer
-                      ) {
-                        optionClass =
-                          "border-red-400 bg-red-50";
+                      if (isSubmitted && isSelected && !isAnswer) {
+                        optionClass = "border-red-400 bg-red-50";
                       }
 
                       return (
@@ -275,10 +297,7 @@ export default function MaterialQuizPage() {
                           type="button"
                           key={`${option}-${optionIndex}`}
                           onClick={() =>
-                            selectAnswer(
-                              questionIndex,
-                              optionIndex
-                            )
+                            selectAnswer(questionIndex, optionIndex)
                           }
                           disabled={isSubmitted}
                           className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm leading-6 transition disabled:cursor-default ${optionClass}`}
@@ -286,10 +305,7 @@ export default function MaterialQuizPage() {
                           <span className="font-bold text-slate-500">
                             {String.fromCharCode(65 + optionIndex)}
                           </span>
-
-                          <span className="text-slate-700">
-                            {option}
-                          </span>
+                          <span className="text-slate-700">{option}</span>
                         </button>
                       );
                     })}
@@ -307,13 +323,10 @@ export default function MaterialQuizPage() {
                         {isCorrect
                           ? "정답입니다."
                           : `오답입니다. 정답은 ${String.fromCharCode(
-                              65 + question.answerIndex
+                              65 + question.answerIndex,
                             )}번입니다.`}
                       </p>
-
-                      <p className="mt-2 leading-6">
-                        {question.explanation}
-                      </p>
+                      <p className="mt-2 leading-6">{question.explanation}</p>
                     </div>
                   )}
                 </section>
@@ -321,49 +334,41 @@ export default function MaterialQuizPage() {
             })}
 
             {isSubmitted ? (
-              <section className="rounded-2xl bg-slate-900 p-7 text-white shadow-sm">
+              <section className="rounded-2xl bg-slate-900 p-7 text-white">
                 <p className="text-sm text-slate-300">최종 점수</p>
-
                 <p className="mt-2 text-4xl font-bold">
                   {score} / {quiz.questions.length}
-                </p>
-
-                <p className="mt-3 text-sm text-slate-300">
-                  정답률{" "}
-                  {Math.round(
-                    (score / quiz.questions.length) * 100
-                  )}
-                  %
                 </p>
 
                 <div className="mt-6 flex flex-wrap gap-3">
                   <button
                     type="button"
-                    onClick={restartQuiz}
+                    onClick={() => {
+                      setAnswers({});
+                      setIsSubmitted(false);
+                      setSaveMessage("");
+                    }}
                     className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-900"
                   >
                     같은 문제 다시 풀기
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={generateQuiz}
-                    disabled={isLoading}
-                    className="rounded-xl border border-slate-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+                  <Link
+                    href="/wrong-answers"
+                    className="rounded-xl border border-slate-600 px-5 py-3 text-sm font-semibold text-white"
                   >
-                    {isLoading
-                      ? "생성 중..."
-                      : "새로운 문제 만들기"}
-                  </button>
+                    오답노트 보기
+                  </Link>
                 </div>
               </section>
             ) : (
               <button
                 type="button"
-                onClick={submitQuiz}
-                className="w-full rounded-xl bg-indigo-600 px-6 py-4 text-sm font-bold text-white transition hover:bg-indigo-500"
+                onClick={() => void submitQuiz()}
+                disabled={isSavingResult}
+                className="w-full rounded-xl bg-indigo-600 px-6 py-4 text-sm font-bold text-white disabled:opacity-50"
               >
-                답안 제출하기
+                {isSavingResult ? "결과 저장 중..." : "답안 제출하기"}
               </button>
             )}
           </div>
