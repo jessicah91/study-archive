@@ -1,174 +1,168 @@
-"use client";
-
 import Link from "next/link";
-import { useEffect, useState } from "react";
 
-type CalendarEvent = {
-  id: string;
-  title: string;
-  start: string;
-  end: string;
-  allDay: boolean;
-  htmlLink: string | null;
+import type {
+  DashboardSchedule,
+  DashboardSubject,
+} from "@/app/page";
+
+type UpcomingScheduleProps = {
+  schedules: DashboardSchedule[];
+  subjects: DashboardSubject[];
 };
 
-type EventsResponse = {
-  connected: boolean;
-  events: CalendarEvent[];
-};
+function formatDate(
+  date: string,
+  time: string | null,
+) {
+  const dateText =
+    new Intl.DateTimeFormat(
+      "ko-KR",
+      {
+        month: "short",
+        day: "numeric",
+        weekday: "short",
+      },
+    ).format(
+      new Date(
+        `${date}T00:00:00`,
+      ),
+    );
 
-function formatDate(date: string, allDay: boolean) {
-  const d = new Date(date);
-
-  return new Intl.DateTimeFormat("ko-KR", {
-    month: "short",
-    day: "numeric",
-    weekday: "short",
-    ...(allDay
-      ? {}
-      : {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-  }).format(d);
+  return time
+    ? `${dateText} ${time.slice(
+        0,
+        5,
+      )}`
+    : dateText;
 }
 
 function getDday(date: string) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const target = new Date(date);
-  target.setHours(0, 0, 0, 0);
-
-  const diff = Math.ceil(
-    (target.getTime() - today.getTime()) /
-      (1000 * 60 * 60 * 24),
+  const target = new Date(
+    `${date}T00:00:00`,
   );
 
-  if (diff === 0) return "D-DAY";
-  if (diff > 0) return `D-${diff}`;
+  const diff = Math.ceil(
+    (target.getTime() -
+      today.getTime()) /
+      86400000,
+  );
+
+  if (diff === 0) {
+    return "D-DAY";
+  }
+
+  if (diff > 0) {
+    return `D-${diff}`;
+  }
 
   return `D+${Math.abs(diff)}`;
 }
 
-export default function UpcomingSchedule() {
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [connected, setConnected] =
-    useState<boolean | null>(null);
+export default function UpcomingSchedule({
+  schedules,
+  subjects,
+}: UpcomingScheduleProps) {
+  const subjectMap = new Map(
+    subjects.map((subject) => [
+      subject.id,
+      subject.name,
+    ]),
+  );
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch("/api/google/events", {
-          cache: "no-store",
-        });
-
-        const json =
-          (await res.json()) as EventsResponse;
-
-        setConnected(json.connected);
-        setEvents((json.events ?? []).slice(0, 4));
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    void load();
-  }, []);
+  const upcoming = schedules
+    .filter(
+      (item) =>
+        !item.completed &&
+        new Date(
+          `${item.due_date}T23:59:59`,
+        ) >= new Date(),
+    )
+    .slice(0, 5);
 
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <p className="text-sm font-semibold tracking-[0.16em] text-indigo-600">
-            GOOGLE CALENDAR
+            UPCOMING
           </p>
 
-          <h2 className="mt-2 text-xl font-black text-slate-900">
+          <h2 className="mt-2 text-xl font-extrabold text-slate-900">
             다가오는 일정
           </h2>
         </div>
 
         <Link
-          href="/calendar"
-          className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+          href="/schedule"
+          className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600"
         >
           전체보기
         </Link>
       </div>
 
-      {loading && (
-        <div className="py-10 text-center text-slate-400">
-          일정 불러오는 중...
-        </div>
-      )}
-
-      {!loading && connected === false && (
+      {upcoming.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center">
-          <div className="text-4xl">📅</div>
-
-          <p className="mt-4 font-semibold text-slate-700">
-            Google Calendar가 연결되지 않았어요.
+          <p className="text-sm font-semibold text-slate-600">
+            다가오는 일정이 없어요.
           </p>
 
-          <a
-            href="/api/google/login"
-            className="mt-5 inline-flex rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+          <Link
+            href="/schedule"
+            className="mt-4 inline-flex rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
           >
-            연결하기
-          </a>
+            일정 추가하기
+          </Link>
         </div>
-      )}
-
-      {!loading &&
-        connected &&
-        events.length === 0 && (
-          <div className="py-10 text-center text-slate-400">
-            다가오는 일정이 없습니다.
-          </div>
-        )}
-
-      {!loading &&
-        connected &&
-        events.length > 0 && (
-          <div className="space-y-3">
-            {events.map((event) => (
-              <div
-                key={event.id}
-                className="flex items-center gap-4 rounded-2xl border border-slate-200 p-4 transition hover:border-indigo-300"
-              >
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-sm font-black text-indigo-600">
-                  {getDday(event.start)}
-                </div>
-
-                <div className="flex-1">
-                  <p className="font-bold text-slate-800">
-                    {event.title}
-                  </p>
-
-                  <p className="mt-1 text-sm text-slate-500">
-                    {formatDate(
-                      event.start,
-                      event.allDay,
-                    )}
-                  </p>
-                </div>
-
-                {event.htmlLink && (
-                  <a
-                    href={event.htmlLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                  >
-                    보기
-                  </a>
+      ) : (
+        <div className="space-y-3">
+          {upcoming.map((item) => (
+            <Link
+              key={item.id}
+              href={
+                item.schedule_type ===
+                "시험"
+                  ? "/exams"
+                  : "/schedule"
+              }
+              className="flex items-center gap-4 rounded-2xl border border-slate-200 p-4 transition hover:border-indigo-300"
+            >
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-sm font-black text-indigo-600">
+                {getDday(
+                  item.due_date,
                 )}
               </div>
-            ))}
-          </div>
-        )}
+
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-bold text-slate-800">
+                  {item.title}
+                </p>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  {formatDate(
+                    item.due_date,
+                    item.due_time,
+                  )}
+                </p>
+
+                <p className="mt-1 text-xs text-slate-400">
+                  {item.schedule_type}
+                  {item.subject_id
+                    ? ` · ${
+                        subjectMap.get(
+                          item.subject_id,
+                        ) ??
+                        "과목 정보 없음"
+                      }`
+                    : ""}
+                </p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

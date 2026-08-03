@@ -1,21 +1,74 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import DashboardStats from "@/components/dashboard/DashboardStats";
-import StudyProgress from "@/components/dashboard/StudyProgress";
-import TodayTasks from "@/components/dashboard/TodayTasks";
 import RecentMaterials from "@/components/dashboard/RecentMaterials";
-import SubjectProgress from "@/components/dashboard/SubjectProgress";
 import RecommendedStudy from "@/components/dashboard/RecommendedStudy";
+import StudyProgress from "@/components/dashboard/StudyProgress";
+import SubjectProgress from "@/components/dashboard/SubjectProgress";
+import TodayTasks from "@/components/dashboard/TodayTasks";
 import UpcomingSchedule from "@/components/dashboard/UpcomingSchedule";
 
+export type DashboardSubject = {
+  id: string;
+  name: string;
+  color?: string | null;
+};
+
+export type DashboardWeek = {
+  id: string;
+  subject_id: string;
+  week_number: number;
+  title: string;
+};
+
+export type DashboardMaterial = {
+  id: string;
+  subject_id: string;
+  week_id: string;
+  original_name: string;
+  file_size: number;
+  created_at: string;
+};
+
+export type DashboardSummary = {
+  id: string;
+  material_id: string;
+  output_type: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type DashboardSchedule = {
+  id: string;
+  subject_id: string | null;
+  title: string;
+  schedule_type: string;
+  due_date: string;
+  due_time: string | null;
+  priority: string;
+  completed: boolean;
+  memo: string | null;
+  study_progress?: number | null;
+  exam_type?: string | null;
+};
+
 type DashboardData = {
-  subjects: any[];
-  weeks: any[];
-  materials: any[];
-  summaries: any[];
+  subjects: DashboardSubject[];
+  weeks: DashboardWeek[];
+  materials: DashboardMaterial[];
+  summaries: DashboardSummary[];
+  schedules: DashboardSchedule[];
+};
+
+type DashboardErrorResponse = {
+  error?: string;
 };
 
 export default function HomePage() {
@@ -31,27 +84,45 @@ export default function HomePage() {
   useEffect(() => {
     async function loadDashboard() {
       try {
+        setIsLoading(true);
+        setError("");
+
         const response = await fetch(
-          "/api/dashboard"
+          "/api/dashboard",
+          {
+            cache: "no-store",
+          },
         );
 
+        const result = (await response.json()) as
+          | DashboardData
+          | DashboardErrorResponse;
+
         if (!response.ok) {
+          const errorResult =
+            result as DashboardErrorResponse;
+
           throw new Error(
-            "대시보드를 불러오지 못했습니다."
+            errorResult.error ??
+              "대시보드를 불러오지 못했습니다.",
           );
         }
 
-        const data =
-          (await response.json()) as DashboardData;
+        setDashboard(
+          result as DashboardData,
+        );
+      } catch (loadError) {
+        console.error(
+          "대시보드 조회 오류:",
+          loadError,
+        );
 
-        setDashboard(data);
-      } catch (err) {
-        console.error(err);
+        setDashboard(null);
 
         setError(
-          err instanceof Error
-            ? err.message
-            : "오류가 발생했습니다."
+          loadError instanceof Error
+            ? loadError.message
+            : "대시보드를 불러오는 중 오류가 발생했습니다.",
         );
       } finally {
         setIsLoading(false);
@@ -60,6 +131,22 @@ export default function HomePage() {
 
     void loadDashboard();
   }, []);
+
+  const completedWeeks =
+    useMemo(() => {
+      if (!dashboard) {
+        return 0;
+      }
+
+      return dashboard.weeks.filter(
+        (week) =>
+          dashboard.materials.some(
+            (material) =>
+              material.week_id ===
+              week.id,
+          ),
+      ).length;
+    }, [dashboard]);
 
   if (isLoading) {
     return (
@@ -84,82 +171,123 @@ export default function HomePage() {
           </h2>
 
           <p className="mt-3 text-red-500">
-            {error}
+            {error ||
+              "대시보드 데이터가 없습니다."}
           </p>
         </div>
       </main>
     );
   }
 
-  const completedWeeks = dashboard.weeks.filter(
-    (week) =>
-      dashboard.materials.some(
-        (material) =>
-          material.week_id === week.id
-      )
-  ).length;
-
   return (
     <main className="mx-auto max-w-7xl space-y-8 px-6 py-8">
-
       <DashboardHeader
-        totalSubjects={dashboard.subjects.length}
-        totalMaterials={dashboard.materials.length}
-        totalSummaries={dashboard.summaries.length}
+        totalSubjects={
+          dashboard.subjects.length
+        }
+        totalMaterials={
+          dashboard.materials.length
+        }
+        totalSummaries={
+          dashboard.summaries.length
+        }
       />
 
       <DashboardStats
-        materials={dashboard.materials.length}
-        summaries={dashboard.summaries.length}
-        weeks={dashboard.weeks.length}
-        subjects={dashboard.subjects.length}
+        materials={
+          dashboard.materials.length
+        }
+        summaries={
+          dashboard.summaries.length
+        }
+        weeks={
+          dashboard.weeks.length
+        }
+        subjects={
+          dashboard.subjects.length
+        }
+        schedules={
+          dashboard.schedules
+        }
       />
 
       <div className="grid gap-8 xl:grid-cols-[1.3fr_0.7fr]">
-
         <StudyProgress
-          totalMaterials={dashboard.materials.length}
-          totalSummaries={dashboard.summaries.length}
-          totalWeeks={dashboard.weeks.length}
-          completedWeeks={completedWeeks}
+          totalMaterials={
+            dashboard.materials.length
+          }
+          totalSummaries={
+            dashboard.summaries.length
+          }
+          totalWeeks={
+            dashboard.weeks.length
+          }
+          completedWeeks={
+            completedWeeks
+          }
         />
 
         <TodayTasks
-          subjectsCount={dashboard.subjects.length}
-          materialsCount={dashboard.materials.length}
-          summariesCount={dashboard.summaries.length}
+          schedules={
+            dashboard.schedules
+          }
+          subjects={
+            dashboard.subjects
+          }
         />
-
       </div>
 
       <div className="grid gap-8 xl:grid-cols-[1.3fr_0.7fr]">
-
         <RecentMaterials
-          materials={dashboard.materials}
-          subjects={dashboard.subjects}
-          weeks={dashboard.weeks}
+          materials={
+            dashboard.materials
+          }
+          subjects={
+            dashboard.subjects
+          }
+          weeks={
+            dashboard.weeks
+          }
         />
 
         <SubjectProgress
-          subjects={dashboard.subjects}
-          weeks={dashboard.weeks}
-          materials={dashboard.materials}
+          subjects={
+            dashboard.subjects
+          }
+          weeks={
+            dashboard.weeks
+          }
+          materials={
+            dashboard.materials
+          }
+        />
+      </div>
+
+      <div className="grid gap-8 xl:grid-cols-2">
+        <RecommendedStudy
+          materials={
+            dashboard.materials
+          }
+          summaries={
+            dashboard.summaries
+          }
+          subjects={
+            dashboard.subjects
+          }
+          schedules={
+            dashboard.schedules
+          }
         />
 
+        <UpcomingSchedule
+          schedules={
+            dashboard.schedules
+          }
+          subjects={
+            dashboard.subjects
+          }
+        />
       </div>
-
-      <div className="grid gap-8 xl:grid-cols-[1fr_1fr]">
-
-        <RecommendedStudy
-  materials={dashboard.materials}
-  summaries={dashboard.summaries}
-  subjects={dashboard.subjects}
-/>
-
-        <UpcomingSchedule />
-
-      </div>
-
     </main>
   );
 }

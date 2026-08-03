@@ -16,21 +16,21 @@ type MenuItem = {
   icon: string;
 };
 
-const menuItems: MenuItem[] = [
+const menuItems = [
   {
     name: "홈",
     href: "/",
-    icon: "⌂",
+    icon: "🏠",
   },
   {
     name: "과목",
     href: "/subjects",
-    icon: "▤",
+    icon: "📚",
   },
   {
     name: "시험 공부",
     href: "/exams",
-    icon: "✎",
+    icon: "📝",
   },
   {
     name: "AI 학습 채팅",
@@ -40,42 +40,47 @@ const menuItems: MenuItem[] = [
   {
     name: "질문 모음",
     href: "/questions",
-    icon: "?",
+    icon: "❓",
   },
   {
     name: "오답노트",
     href: "/wrong-answers",
-    icon: "!",
+    icon: "📕",
   },
   {
     name: "암기카드",
     href: "/flashcards",
-    icon: "▣",
+    icon: "🗂️",
   },
   {
     name: "학점 관리",
     href: "/grades",
-    icon: "A",
+    icon: "🎓",
   },
   {
     name: "일정·과제",
     href: "/schedule",
-    icon: "□",
+    icon: "📅",
+  },
+  {
+    name: "시간표",
+    href: "/timetable",
+    icon: "🗓️",
   },
   {
     name: "문제 풀이",
     href: "/quiz",
-    icon: "✓",
+    icon: "✏️",
   },
   {
     name: "자료실",
     href: "/library",
-    icon: "▱",
+    icon: "📂",
   },
   {
     name: "설정",
     href: "/settings",
-    icon: "⚙",
+    icon: "⚙️",
   },
 ];
 
