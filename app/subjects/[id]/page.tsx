@@ -18,6 +18,41 @@ import type {
 } from "@/types/week";
 
 const TOTAL_SEMESTER_WEEKS = 15;
+const SEMESTER_START_DATE = "2026-09-01";
+
+function formatDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function calculateWeekDates(weekNumber: number) {
+  if (!Number.isInteger(weekNumber) || weekNumber < 1) {
+    return {
+      startDate: "",
+      endDate: "",
+    };
+  }
+
+  const semesterStart = new Date(
+    `${SEMESTER_START_DATE}T00:00:00`,
+  );
+
+  const startDate = new Date(semesterStart);
+  startDate.setDate(
+    semesterStart.getDate() + (weekNumber - 1) * 7,
+  );
+
+  const endDate = new Date(startDate);
+  endDate.setDate(startDate.getDate() + 6);
+
+  return {
+    startDate: formatDateInputValue(startDate),
+    endDate: formatDateInputValue(endDate),
+  };
+}
 
 const initialWeekForm: WeekFormData = {
   week_number: "",
@@ -253,6 +288,31 @@ export default function SubjectDetailPage() {
     }));
   }
 
+  function handleWeekNumberChange(value: string) {
+    const weekNumber = Number(value);
+    const { startDate, endDate } =
+      calculateWeekDates(weekNumber);
+
+    setWeekForm((previous) => {
+      const shouldUpdateTitle =
+        !previous.title.trim() ||
+        /^\d+주차$/.test(previous.title.trim());
+
+      return {
+        ...previous,
+        week_number: value,
+        title:
+          shouldUpdateTitle &&
+          Number.isInteger(weekNumber) &&
+          weekNumber > 0
+            ? `${weekNumber}주차`
+            : previous.title,
+        start_date: startDate,
+        end_date: endDate,
+      };
+    });
+  }
+
   function resetWeekForm() {
     setWeekForm(initialWeekForm);
     setEditingWeekId(null);
@@ -268,12 +328,17 @@ export default function SubjectDetailPage() {
   }
 
   function fillNextWeekNumber() {
+    const { startDate, endDate } =
+      calculateWeekDates(nextWeekNumber);
+
     setWeekForm((previous) => ({
       ...previous,
       week_number: String(nextWeekNumber),
       title:
         previous.title.trim() ||
         `${nextWeekNumber}주차`,
+      start_date: startDate,
+      end_date: endDate,
     }));
   }
 
@@ -872,7 +937,9 @@ export default function SubjectDetailPage() {
             </h2>
 
             <p className="mt-2 text-sm text-slate-500">
-              주차 번호와 제목은 필수예요.
+              주차 번호를 입력하면 2026년 9월 1일을
+              기준으로 시작일과 종료일이 자동 입력돼요.
+              필요한 경우 날짜를 직접 수정할 수도 있어요.
             </p>
           </div>
 
@@ -904,8 +971,7 @@ export default function SubjectDetailPage() {
                 required
                 value={weekForm.week_number}
                 onChange={(event) =>
-                  updateWeekForm(
-                    "week_number",
+                  handleWeekNumberChange(
                     event.target.value,
                   )
                 }
