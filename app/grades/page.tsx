@@ -1,631 +1,611 @@
-import {
-  getCourses,
-  getPercentileTable,
-  getSemesters,
-} from "@/lib/grades";
+"use client";
 
-type SemesterRow = {
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
+
+type GradeSemester = {
   id: string;
   semester_name: string;
   year: number;
   semester_number: number;
-  total_credits: number | string;
-  gpa: number | string;
-  major_gpa: number | string | null;
-  percentile: number | string | null;
-  completed_courses: number;
+  created_at: string;
 };
 
-type CourseRow = {
+type GradeCourse = {
   id: string;
   semester_id: string;
   course_name: string;
   category: "전공" | "교양" | "기타";
-  credits: number | string;
+  credits: number;
   letter_grade: string;
-  grade_point: number | string | null;
+  grade_point: number | null;
   is_major: boolean;
   memo: string | null;
+  created_at: string;
 };
 
-type PercentileRow = {
-  id: string;
-  gpa: number | string;
-  percentile: number | string;
+type CourseForm = {
+  semester_id: string;
+  course_name: string;
+  category: "전공" | "교양" | "기타";
+  credits: number;
+  letter_grade: string;
+  is_major: boolean;
+  memo: string;
 };
 
-function toNumber(value: number | string | null | undefined) {
-  const convertedValue = Number(value);
+const GRADE_POINTS: Record<string, number | null> = {
+  "A+": 4.3,
+  A0: 4.0,
+  "B+": 3.3,
+  B0: 3.0,
+  "C+": 2.3,
+  C0: 2.0,
+  "D+": 1.3,
+  D0: 1.0,
+  F: 0,
+  P: null,
+  NP: null,
+};
 
-  if (Number.isNaN(convertedValue)) {
-    return 0;
-  }
+const EMPTY_SEMESTER = {
+  semester_name: "",
+  year: new Date().getFullYear(),
+  semester_number: 1,
+};
 
-  return convertedValue;
-}
+const EMPTY_COURSE: CourseForm = {
+  semester_id: "",
+  course_name: "",
+  category: "전공",
+  credits: 3,
+  letter_grade: "A+",
+  is_major: true,
+  memo: "",
+};
 
-function normalizeGpa(gpa: number) {
-  return gpa.toFixed(2);
-}
-
-function formatPercentile(percentile: number | null) {
-  if (percentile === null) {
-    return "환산표 미등록";
-  }
-
-  return percentile.toFixed(2);
-}
-
-function getGradeStyle(grade: string) {
-  if (grade === "A+") {
-    return "bg-indigo-50 text-indigo-700";
-  }
-
-  if (grade === "A0") {
-    return "bg-emerald-50 text-emerald-700";
-  }
-
-  if (grade.startsWith("B")) {
-    return "bg-amber-50 text-amber-700";
-  }
-
-  if (grade.startsWith("C")) {
-    return "bg-orange-50 text-orange-700";
-  }
-
-  if (grade === "F" || grade === "NP") {
-    return "bg-rose-50 text-rose-700";
-  }
-
-  return "bg-slate-100 text-slate-600";
-}
-
-export default async function GradesPage() {
-  const [
-    semesterResult,
-    courseResult,
-    percentileResult,
-  ] = await Promise.all([
-    getSemesters(),
-    getCourses(),
-    getPercentileTable(),
-  ]);
-
-  const semesters = (semesterResult ?? []) as SemesterRow[];
-  const courses = (courseResult ?? []) as CourseRow[];
-  const percentileRows = (percentileResult ??
-    []) as PercentileRow[];
-
-  const percentileMap = new Map<string, number>(
-    percentileRows.map((row) => [
-      normalizeGpa(toNumber(row.gpa)),
-      toNumber(row.percentile),
-    ]),
+function calculateGpa(courses: GradeCourse[]) {
+  const graded = courses.filter(
+    (course) => course.grade_point !== null && course.credits > 0,
   );
 
-  function getPercentile(gpa: number) {
-    return percentileMap.get(normalizeGpa(gpa)) ?? null;
+  const totalCredits = graded.reduce(
+    (sum, course) => sum + Number(course.credits),
+    0,
+  );
+
+  if (totalCredits === 0) return 0;
+
+  const points = graded.reduce(
+    (sum, course) =>
+      sum + Number(course.grade_point ?? 0) * Number(course.credits),
+    0,
+  );
+
+  return points / totalCredits;
+}
+
+export default function GradesPage() {
+  const [semesters, setSemesters] = useState<GradeSemester[]>([]);
+  const [courses, setCourses] = useState<GradeCourse[]>([]);
+  const [semesterForm, setSemesterForm] = useState(EMPTY_SEMESTER);
+  const [courseForm, setCourseForm] =
+         useState<CourseForm>(EMPTY_COURSE);
+  const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
+  const [showSemesterForm, setShowSemesterForm] = useState(false);
+  const [showCourseForm, setShowCourseForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setMessage("");
+
+    const [semesterResult, courseResult] = await Promise.all([
+      supabase
+        .from("grade_semesters")
+        .select("id, semester_name, year, semester_number, created_at")
+        .order("year", { ascending: false })
+        .order("semester_number", { ascending: false }),
+      supabase
+        .from("grade_courses")
+        .select(
+          "id, semester_id, course_name, category, credits, letter_grade, grade_point, is_major, memo, created_at",
+        )
+        .order("created_at", { ascending: false }),
+    ]);
+
+    if (semesterResult.error) {
+      setMessage(`학기 정보를 불러오지 못했어요: ${semesterResult.error.message}`);
+    }
+
+    if (courseResult.error) {
+      setMessage(`성적 정보를 불러오지 못했어요: ${courseResult.error.message}`);
+    }
+
+    const nextSemesters =
+      (semesterResult.data ?? []) as GradeSemester[];
+    const nextCourses =
+      (courseResult.data ?? []) as GradeCourse[];
+
+    setSemesters(nextSemesters);
+    setCourses(nextCourses);
+
+    if (!courseForm.semester_id && nextSemesters[0]) {
+      setCourseForm((previous) => ({
+        ...previous,
+        semester_id: nextSemesters[0].id,
+      }));
+    }
+
+    setLoading(false);
+  }, [courseForm.semester_id]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const cumulativeGpa = useMemo(
+    () => calculateGpa(courses),
+    [courses],
+  );
+
+  const totalCredits = useMemo(
+    () => courses.reduce((sum, course) => sum + Number(course.credits), 0),
+    [courses],
+  );
+
+  const majorGpa = useMemo(
+    () => calculateGpa(courses.filter((course) => course.is_major)),
+    [courses],
+  );
+
+  const semesterSummaries = useMemo(
+    () =>
+      semesters.map((semester) => {
+        const semesterCourses = courses.filter(
+          (course) => course.semester_id === semester.id,
+        );
+
+        return {
+          ...semester,
+          courses: semesterCourses,
+          credits: semesterCourses.reduce(
+            (sum, course) => sum + Number(course.credits),
+            0,
+          ),
+          gpa: calculateGpa(semesterCourses),
+          majorGpa: calculateGpa(
+            semesterCourses.filter((course) => course.is_major),
+          ),
+        };
+      }),
+    [semesters, courses],
+  );
+
+  async function saveSemester(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+
+    const { error } = await supabase.from("grade_semesters").insert({
+      semester_name: semesterForm.semester_name.trim(),
+      year: Number(semesterForm.year),
+      semester_number: Number(semesterForm.semester_number),
+    });
+
+    if (error) {
+      setMessage(`학기를 저장하지 못했어요: ${error.message}`);
+    } else {
+      setMessage("학기를 추가했어요.");
+      setSemesterForm(EMPTY_SEMESTER);
+      setShowSemesterForm(false);
+      await loadData();
+    }
+
+    setSaving(false);
   }
 
-  if (semesters.length === 0) {
+  async function saveCourse(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!courseForm.semester_id) {
+      setMessage("학기를 먼저 선택해 주세요.");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+
+    const payload = {
+      semester_id: courseForm.semester_id,
+      course_name: courseForm.course_name.trim(),
+      category: courseForm.category,
+      credits: Number(courseForm.credits),
+      letter_grade: courseForm.letter_grade,
+      grade_point: GRADE_POINTS[courseForm.letter_grade],
+      is_major: courseForm.is_major,
+      memo: courseForm.memo.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const result = editingCourseId
+      ? await supabase
+          .from("grade_courses")
+          .update(payload)
+          .eq("id", editingCourseId)
+      : await supabase.from("grade_courses").insert(payload);
+
+    if (result.error) {
+      setMessage(`성적을 저장하지 못했어요: ${result.error.message}`);
+    } else {
+      setMessage(editingCourseId ? "성적을 수정했어요." : "성적을 추가했어요.");
+      setEditingCourseId(null);
+      setCourseForm({
+        ...EMPTY_COURSE,
+        semester_id: semesters[0]?.id ?? "",
+      });
+      setShowCourseForm(false);
+      await loadData();
+    }
+
+    setSaving(false);
+  }
+
+  function editCourse(course: GradeCourse) {
+    setEditingCourseId(course.id);
+    setCourseForm({
+      semester_id: course.semester_id,
+      course_name: course.course_name,
+      category: course.category,
+      credits: Number(course.credits),
+      letter_grade: course.letter_grade,
+      is_major: course.is_major,
+      memo: course.memo ?? "",
+    });
+    setShowCourseForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function deleteCourse(courseId: string) {
+    if (!window.confirm("이 성적을 삭제할까요?")) return;
+
+    const { error } = await supabase
+      .from("grade_courses")
+      .delete()
+      .eq("id", courseId);
+
+    if (error) {
+      setMessage(`성적을 삭제하지 못했어요: ${error.message}`);
+      return;
+    }
+
+    setMessage("성적을 삭제했어요.");
+    await loadData();
+  }
+
+  if (loading) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6">
-        <div className="mx-auto max-w-6xl">
-          <header className="mb-8">
-            <p className="text-sm font-semibold text-indigo-600">
-              성적 분석
-            </p>
-
-            <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
-              학점관리
-            </h1>
-
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              학기별 학점과 학교 기준 백분위를 함께
-              확인해요.
-            </p>
-          </header>
-
-          <section className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
-            <p className="text-4xl">🎓</p>
-
-            <h2 className="mt-4 text-xl font-bold text-slate-900">
-              등록된 학기 성적이 없어요
-            </h2>
-
-            <p className="mt-2 text-sm text-slate-500">
-              Supabase의 grade_semesters 테이블에 성적을
-              등록해 주세요.
-            </p>
-          </section>
-        </div>
+      <main className="flex min-h-[60vh] items-center justify-center">
+        <p className="text-sm text-slate-500">학점 정보를 불러오는 중...</p>
       </main>
     );
   }
 
-  const currentSemester = semesters[0];
-
-  const currentSemesterGpa = toNumber(
-    currentSemester.gpa,
-  );
-
-  const currentSemesterCredits = toNumber(
-    currentSemester.total_credits,
-  );
-
-  const currentSemesterCourses = courses.filter(
-    (course) =>
-      course.semester_id === currentSemester.id,
-  );
-
-  const cumulativeCredits = semesters.reduce(
-    (total, semester) =>
-      total + toNumber(semester.total_credits),
-    0,
-  );
-
-  const totalGradePoints = semesters.reduce(
-    (total, semester) =>
-      total +
-      toNumber(semester.gpa) *
-        toNumber(semester.total_credits),
-    0,
-  );
-
-  const cumulativeGpa =
-    cumulativeCredits === 0
-      ? 0
-      : totalGradePoints / cumulativeCredits;
-
-  const cumulativePercentile = getPercentile(
-    Number(cumulativeGpa.toFixed(2)),
-  );
-
-  const currentPercentile =
-    getPercentile(currentSemesterGpa);
-
-  const totalCourses = semesters.reduce(
-    (total, semester) =>
-      total + toNumber(semester.completed_courses),
-    0,
-  );
-
-  const highestSemesterGpa = Math.max(
-    ...semesters.map((semester) =>
-      toNumber(semester.gpa),
-    ),
-  );
-
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6">
-      <div className="mx-auto max-w-6xl">
-        <header className="mb-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-indigo-600">
-                성적 분석
-              </p>
+    <main className="mx-auto w-full max-w-7xl space-y-8 px-6 py-8">
+      <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <p className="text-sm font-semibold tracking-[0.16em] text-indigo-600">
+            GRADE MANAGER
+          </p>
+          <h1 className="mt-2 text-3xl font-extrabold text-slate-900">
+            학점 관리
+          </h1>
+          <p className="mt-2 text-sm text-slate-500">
+            4.3 만점 기준으로 학기별·누적 평점을 자동 계산해요.
+          </p>
+        </div>
 
-              <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
-                학점관리
-              </h1>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowSemesterForm((value) => !value)}
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600"
+          >
+            + 학기 추가
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingCourseId(null);
+              setCourseForm({
+                ...EMPTY_COURSE,
+                semester_id: semesters[0]?.id ?? "",
+              });
+              setShowCourseForm(true);
+            }}
+            className="rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white"
+          >
+            + 성적 입력
+          </button>
+        </div>
+      </header>
 
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                학기별 학점과 학교 기준 백분위를 함께
-                확인해요.
-              </p>
-            </div>
+      {message && (
+        <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm font-semibold text-indigo-700">
+          {message}
+        </div>
+      )}
 
-            <button
-              type="button"
-              disabled
-              className="w-fit cursor-not-allowed rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white opacity-60"
+      {showSemesterForm && (
+        <form
+          onSubmit={saveSemester}
+          className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4"
+        >
+          <input
+            required
+            value={semesterForm.semester_name}
+            onChange={(event) =>
+              setSemesterForm((previous) => ({
+                ...previous,
+                semester_name: event.target.value,
+              }))
+            }
+            placeholder="예: 2026-2학기"
+            className="rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+          />
+          <input
+            type="number"
+            required
+            value={semesterForm.year}
+            onChange={(event) =>
+              setSemesterForm((previous) => ({
+                ...previous,
+                year: Number(event.target.value),
+              }))
+            }
+            className="rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+          />
+          <select
+            value={semesterForm.semester_number}
+            onChange={(event) =>
+              setSemesterForm((previous) => ({
+                ...previous,
+                semester_number: Number(event.target.value),
+              }))
+            }
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+          >
+            <option value={1}>1학기</option>
+            <option value={2}>2학기</option>
+            <option value={3}>여름학기</option>
+            <option value={4}>겨울학기</option>
+          </select>
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            학기 저장
+          </button>
+        </form>
+      )}
+
+      {showCourseForm && (
+        <form
+          onSubmit={saveCourse}
+          className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2 xl:grid-cols-4"
+        >
+          <select
+            required
+            value={courseForm.semester_id}
+            onChange={(event) =>
+              setCourseForm((previous) => ({
+                ...previous,
+                semester_id: event.target.value,
+              }))
+            }
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+          >
+            <option value="">학기 선택</option>
+            {semesters.map((semester) => (
+              <option key={semester.id} value={semester.id}>
+                {semester.semester_name}
+              </option>
+            ))}
+          </select>
+
+          <input
+            required
+            value={courseForm.course_name}
+            onChange={(event) =>
+              setCourseForm((previous) => ({
+                ...previous,
+                course_name: event.target.value,
+              }))
+            }
+            placeholder="과목명"
+            className="rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+          />
+
+          <select
+            value={courseForm.category}
+            onChange={(event) => {
+              const category = event.target.value as "전공" | "교양" | "기타";
+              setCourseForm((previous) => ({
+                ...previous,
+                category,
+                is_major: category === "전공",
+              }));
+            }}
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+          >
+            <option value="전공">전공</option>
+            <option value="교양">교양</option>
+            <option value="기타">기타</option>
+          </select>
+
+          <input
+            type="number"
+            min={0}
+            step={0.5}
+            required
+            value={courseForm.credits}
+            onChange={(event) =>
+              setCourseForm((previous) => ({
+                ...previous,
+                credits: Number(event.target.value),
+              }))
+            }
+            placeholder="학점"
+            className="rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+          />
+
+          <select
+            value={courseForm.letter_grade}
+            onChange={(event) =>
+              setCourseForm((previous) => ({
+                ...previous,
+                letter_grade: event.target.value,
+              }))
+            }
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+          >
+            {Object.keys(GRADE_POINTS).map((grade) => (
+              <option key={grade} value={grade}>
+                {grade}
+              </option>
+            ))}
+          </select>
+
+          <input
+            value={courseForm.memo}
+            onChange={(event) =>
+              setCourseForm((previous) => ({
+                ...previous,
+                memo: event.target.value,
+              }))
+            }
+            placeholder="메모"
+            className="rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+          />
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {editingCourseId ? "수정 완료" : "성적 저장"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowCourseForm(false);
+              setEditingCourseId(null);
+            }}
+            className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600"
+          >
+            취소
+          </button>
+        </form>
+      )}
+
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          ["누적 평점", cumulativeGpa.toFixed(2)],
+          ["전공 평점", majorGpa.toFixed(2)],
+          ["총 이수학점", `${totalCredits}학점`],
+          ["등록 과목", `${courses.length}개`],
+        ].map(([label, value]) => (
+          <article
+            key={label}
+            className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"
+          >
+            <p className="text-sm text-slate-500">{label}</p>
+            <p className="mt-2 text-3xl font-extrabold text-slate-900">
+              {value}
+            </p>
+          </article>
+        ))}
+      </section>
+
+      <section className="space-y-5">
+        {semesterSummaries.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+            <p className="text-sm text-slate-500">
+              학기를 추가한 뒤 성적을 입력해 주세요.
+            </p>
+          </div>
+        ) : (
+          semesterSummaries.map((semester) => (
+            <article
+              key={semester.id}
+              className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
             >
-              + 성적 입력
-            </button>
-          </div>
-        </header>
-
-        <section className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              현재 학기 평점
-            </p>
-
-            <div className="mt-2 flex items-end gap-1">
-              <p className="text-3xl font-bold text-slate-900">
-                {currentSemesterGpa.toFixed(2)}
-              </p>
-
-              <span className="pb-1 text-sm font-medium text-slate-400">
-                / 4.30
-              </span>
-            </div>
-
-            <p className="mt-2 text-xs text-slate-400">
-              {currentSemester.semester_name}
-            </p>
-          </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              현재 학기 백분위
-            </p>
-
-            <div className="mt-2 flex items-end gap-1">
-              <p className="text-3xl font-bold text-indigo-600">
-                {formatPercentile(currentPercentile)}
-              </p>
-
-              {currentPercentile !== null && (
-                <span className="pb-1 text-sm font-medium text-slate-400">
-                  점
+              <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+                <div>
+                  <h2 className="text-xl font-extrabold text-slate-900">
+                    {semester.semester_name}
+                  </h2>
+                  <p className="mt-2 text-sm text-slate-500">
+                    {semester.credits}학점 · 평점 {semester.gpa.toFixed(2)} · 전공{" "}
+                    {semester.majorGpa.toFixed(2)}
+                  </p>
+                </div>
+                <span className="rounded-xl bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700">
+                  {semester.courses.length}과목
                 </span>
-              )}
-            </div>
-
-            <p className="mt-2 text-xs text-slate-400">
-              학교 환산표 기준
-            </p>
-          </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              누적 평점
-            </p>
-
-            <div className="mt-2 flex items-end gap-1">
-              <p className="text-3xl font-bold text-emerald-600">
-                {cumulativeGpa.toFixed(2)}
-              </p>
-
-              <span className="pb-1 text-sm font-medium text-slate-400">
-                / 4.30
-              </span>
-            </div>
-
-            <p className="mt-2 text-xs text-slate-400">
-              총 {cumulativeCredits}학점
-            </p>
-          </article>
-
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">
-              누적 백분위
-            </p>
-
-            <div className="mt-2 flex items-end gap-1">
-              <p className="text-3xl font-bold text-rose-500">
-                {formatPercentile(cumulativePercentile)}
-              </p>
-
-              {cumulativePercentile !== null && (
-                <span className="pb-1 text-sm font-medium text-slate-400">
-                  점
-                </span>
-              )}
-            </div>
-
-            <p className="mt-2 text-xs text-slate-400">
-              환산표 등록값만 표시
-            </p>
-          </article>
-        </section>
-
-        <section className="mb-8 rounded-2xl border border-indigo-200 bg-indigo-50 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-lg shadow-sm">
-              %
-            </div>
-
-            <div>
-              <h2 className="font-bold text-indigo-950">
-                백분위 환산 방식
-              </h2>
-
-              <p className="mt-2 text-sm leading-6 text-indigo-900/70">
-                평점을 소수점 둘째 자리까지 맞춘 뒤 학교
-                백분위 환산표에서 동일한 값을 찾아 표시해요.
-                환산표에 없는 평점은 임의로 계산하거나
-                보간하지 않아요.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="mb-8 grid gap-6 lg:grid-cols-[1.45fr_0.75fr]">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">
-                  학기별 성적
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  각 학기의 평점과 백분위를 비교해요.
-                </p>
               </div>
 
-              <span className="text-sm font-medium text-slate-400">
-                총 {semesters.length}학기
-              </span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 text-left">
-                    <th className="px-3 py-3 text-xs font-semibold text-slate-500">
-                      학기
-                    </th>
-
-                    <th className="px-3 py-3 text-xs font-semibold text-slate-500">
-                      이수학점
-                    </th>
-
-                    <th className="px-3 py-3 text-xs font-semibold text-slate-500">
-                      전체 평점
-                    </th>
-
-                    <th className="px-3 py-3 text-xs font-semibold text-slate-500">
-                      백분위
-                    </th>
-
-                    <th className="px-3 py-3 text-xs font-semibold text-slate-500">
-                      전공 평점
-                    </th>
-
-                    <th className="px-3 py-3 text-xs font-semibold text-slate-500">
-                      과목 수
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {semesters.map((semester) => {
-                    const semesterGpa = toNumber(
-                      semester.gpa,
-                    );
-
-                    const percentile =
-                      getPercentile(semesterGpa);
-
-                    const majorGpa =
-                      semester.major_gpa === null
-                        ? null
-                        : toNumber(semester.major_gpa);
-
-                    return (
-                      <tr
-                        key={semester.id}
-                        className="border-b border-slate-100 last:border-b-0"
-                      >
-                        <td className="px-3 py-4">
-                          <p className="font-semibold text-slate-900">
-                            {semester.semester_name}
-                          </p>
-                        </td>
-
-                        <td className="px-3 py-4 text-sm text-slate-600">
-                          {toNumber(
-                            semester.total_credits,
-                          )}
-                          학점
-                        </td>
-
-                        <td className="px-3 py-4">
-                          <span className="font-bold text-slate-900">
-                            {semesterGpa.toFixed(2)}
-                          </span>
-
-                          <span className="ml-1 text-xs text-slate-400">
-                            / 4.30
-                          </span>
-                        </td>
-
-                        <td className="px-3 py-4">
-                          {percentile !== null ? (
-                            <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-sm font-bold text-indigo-700">
-                              {percentile.toFixed(2)}
-                            </span>
-                          ) : (
-                            <span className="text-xs font-medium text-amber-600">
-                              환산표 미등록
-                            </span>
-                          )}
-                        </td>
-
-                        <td className="px-3 py-4 text-sm font-semibold text-emerald-700">
-                          {majorGpa === null
-                            ? "-"
-                            : majorGpa.toFixed(2)}
-                        </td>
-
-                        <td className="px-3 py-4 text-sm text-slate-600">
-                          {semester.completed_courses}개
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <aside className="space-y-6">
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-bold text-slate-900">
-                학점 요약
-              </h2>
-
-              <div className="mt-5 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                  <span className="text-sm text-slate-500">
-                    총 이수학점
-                  </span>
-
-                  <span className="font-bold text-slate-900">
-                    {cumulativeCredits}학점
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                  <span className="text-sm text-slate-500">
-                    완료 과목
-                  </span>
-
-                  <span className="font-bold text-slate-900">
-                    {totalCourses}개
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                  <span className="text-sm text-slate-500">
-                    최고 학기 평점
-                  </span>
-
-                  <span className="font-bold text-indigo-600">
-                    {highestSemesterGpa.toFixed(2)}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-500">
-                    기준 만점
-                  </span>
-
-                  <span className="font-bold text-slate-900">
-                    4.30
-                  </span>
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-slate-900 p-6 text-white shadow-sm">
-              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-indigo-200">
-                현재 성적
-              </span>
-
-              <h2 className="mt-4 text-2xl font-bold">
-                {currentSemesterGpa.toFixed(2)}
-              </h2>
-
-              <p className="mt-2 text-sm text-slate-300">
-                학교 기준 백분위
-              </p>
-
-              <p className="mt-1 text-3xl font-bold text-indigo-300">
-                {formatPercentile(currentPercentile)}
-              </p>
-
-              {currentPercentile !== null && (
-                <p className="mt-1 text-xs text-slate-400">
-                  백분위 점수
-                </p>
-              )}
-            </section>
-          </aside>
-        </section>
-
-        <section className="mb-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-bold text-slate-900">
-                현재 학기 과목
-              </h2>
-
-              <p className="mt-1 text-sm text-slate-500">
-                {currentSemester.semester_name} 과목별 성적을
-                확인해요.
-              </p>
-            </div>
-
-            <span className="text-sm font-medium text-slate-400">
-              {currentSemesterCourses.length}과목
-            </span>
-          </div>
-
-          {currentSemesterCourses.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-10 text-center">
-              <p className="text-sm text-slate-500">
-                현재 학기에 등록된 과목이 없어요.
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {currentSemesterCourses.map((course) => {
-                const gradePoint =
-                  course.grade_point === null
-                    ? null
-                    : toNumber(course.grade_point);
-
-                return (
-                  <article
+              <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {semester.courses.map((course) => (
+                  <div
                     key={course.id}
-                    className="rounded-2xl border border-slate-200 p-5"
+                    className="rounded-2xl border border-slate-200 p-4"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <span className="text-xs font-semibold text-slate-400">
+                        <p className="text-xs font-semibold text-slate-400">
                           {course.category}
-                        </span>
-
-                        <h3 className="mt-2 font-bold text-slate-900">
+                        </p>
+                        <h3 className="mt-1 font-bold text-slate-900">
                           {course.course_name}
                         </h3>
-
                         <p className="mt-1 text-sm text-slate-500">
-                          {toNumber(course.credits)}학점
+                          {course.credits}학점
                         </p>
                       </div>
-
-                      <span
-                        className={`rounded-xl px-3 py-2 text-sm font-bold ${getGradeStyle(
-                          course.letter_grade,
-                        )}`}
-                      >
+                      <span className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-bold text-white">
                         {course.letter_grade}
                       </span>
                     </div>
 
-                    <div className="mt-5 border-t border-slate-100 pt-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-400">
-                          평점
-                        </span>
-
-                        <span className="text-sm font-bold text-slate-700">
-                          {gradePoint === null
-                            ? "-"
-                            : gradePoint.toFixed(2)}
-                        </span>
-                      </div>
+                    <div className="mt-4 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => editCourse(course)}
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600"
+                      >
+                        수정
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteCourse(course.id)}
+                        className="rounded-xl border border-red-100 px-3 py-2 text-xs font-semibold text-red-500"
+                      >
+                        삭제
+                      </button>
                     </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        <section className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-8 text-center">
-          <p className="text-3xl">🎓</p>
-
-          <h2 className="mt-3 text-lg font-bold text-slate-900">
-            백분위 환산표를 정확하게 적용해요
-          </h2>
-
-          <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            Supabase에 등록된 GPA와 동일한 값이 있을 때만
-            백분위를 표시해요. 환산표에 없는 값은 임의로
-            계산하거나 보간하지 않아요.
-          </p>
-        </section>
-
-        <p className="mt-4 text-center text-xs text-slate-400">
-          현재 학기 이수학점: {currentSemesterCredits}학점
-        </p>
-      </div>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))
+        )}
+      </section>
     </main>
   );
 }
