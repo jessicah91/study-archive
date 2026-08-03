@@ -1,16 +1,10 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 type ExtractApiResponse = {
   message?: string;
   error?: string;
-  result?: {
-    pageCount?: number;
-    characterCount?: number;
-    preview?: string;
-  };
 };
 
 type MaterialExtractButtonProps = {
@@ -24,13 +18,14 @@ export default function MaterialExtractButton({
   hasExtractedText = false,
   className = "",
 }: MaterialExtractButtonProps) {
-  const router = useRouter();
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  const [isExtracting, setIsExtracting] =
-    useState(false);
-
-  const [errorMessage, setErrorMessage] =
-    useState("");
+  function openAnalysisPage() {
+    window.location.assign(
+      `/materials/${encodeURIComponent(materialId)}`,
+    );
+  }
 
   async function handleClick() {
     if (!materialId || isExtracting) {
@@ -38,7 +33,7 @@ export default function MaterialExtractButton({
     }
 
     if (hasExtractedText) {
-      router.push(`/materials/${materialId}`);
+      openAnalysisPage();
       return;
     }
 
@@ -46,25 +41,19 @@ export default function MaterialExtractButton({
       setIsExtracting(true);
       setErrorMessage("");
 
-      const response = await fetch(
-        "/api/materials/extract",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            materialId,
-          }),
+      const response = await fetch("/api/materials/extract", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify({ materialId }),
+      });
 
-      const contentType =
-        response.headers.get("content-type");
+      const contentType = response.headers.get("content-type");
 
       if (!contentType?.includes("application/json")) {
         throw new Error(
-          `서버 응답을 읽지 못했어요. 상태 코드: ${response.status}`,
+          `텍스트 추출 서버 응답을 읽지 못했어요. 상태 코드: ${response.status}`,
         );
       }
 
@@ -73,13 +62,11 @@ export default function MaterialExtractButton({
 
       if (!response.ok) {
         throw new Error(
-          result.error ??
-            "텍스트 추출에 실패했어요.",
+          result.error ?? "텍스트 추출에 실패했어요.",
         );
       }
 
-      router.push(`/materials/${materialId}`);
-      router.refresh();
+      openAnalysisPage();
     } catch (error) {
       console.error("텍스트 추출 오류:", error);
 

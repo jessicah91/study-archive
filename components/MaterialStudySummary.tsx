@@ -371,12 +371,14 @@ export default function MaterialStudySummary({
         </div>
 
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Link
-            href={`/materials/${materialId}/quiz`}
-            className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-500"
-          >
-            문제 풀기
-          </Link>
+          {summary.documentType !== "syllabus" && (
+            <Link
+              href={`/materials/${materialId}/quiz`}
+              className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-500"
+            >
+              문제 풀기
+            </Link>
+          )}
 
           <button
             type="button"
@@ -525,7 +527,9 @@ export default function MaterialStudySummary({
                 >
                   <p className="text-sm leading-6 text-slate-700">
                     <span className="mr-2 font-bold text-indigo-600">
-                      Q{index + 1}.
+                      {summary.documentType === "syllabus"
+                        ? `${index + 1}.`
+                        : `Q${index + 1}.`}
                     </span>
 
                     {question}

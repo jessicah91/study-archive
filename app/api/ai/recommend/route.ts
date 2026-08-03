@@ -1,9 +1,9 @@
 import OpenAI from "openai";
-import { NextResponse } from "next/server";
 import { google } from "googleapis";
+import { NextResponse } from "next/server";
 
-import { supabaseAdmin } from "@/lib/supabase-admin";
 import { getAuthorizedGoogleClient } from "@/lib/google-calendar";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,12 +18,8 @@ export async function GET() {
 
     if (!oauth) {
       return NextResponse.json(
-        {
-          connected: false,
-        },
-        {
-          status: 401,
-        },
+        { connected: false },
+        { status: 401 },
       );
     }
 
@@ -35,10 +31,10 @@ export async function GET() {
     const calendarResult =
       await calendar.events.list({
         calendarId: "primary",
-        timeMin: new Date().toISOString(),
-        maxResults: 100,
         singleEvents: true,
         orderBy: "startTime",
+        timeMin: new Date().toISOString(),
+        maxResults: 30,
       });
 
     const events =
@@ -47,55 +43,67 @@ export async function GET() {
         start:
           event.start?.dateTime ??
           event.start?.date,
+        description: event.description,
       })) ?? [];
 
-    const { data: materials } =
+    const { data: summaries } =
       await supabaseAdmin
-        .from("study_materials")
-        .select("original_name")
-        .order("created_at", {
+        .from("study_ai_outputs")
+        .select("content")
+        .eq("output_type", "summary")
+        .order("updated_at", {
           ascending: false,
         })
-        .limit(20);
+        .limit(5);
 
-    const prompt = `
-너는 최고의 학습 코치다.
-
-다가오는 일정
-
-${JSON.stringify(events, null, 2)}
-
-보유 자료
-
-${materials
-  ?.map((m) => m.original_name)
-  .join("\n")}
-
-해야 할 일
-
-1. 가장 중요한 일정 찾기
-2. 오늘 공부하면 좋은 것 추천
-3. 예상 공부시간
-4. 우선순위
-5. 간단한 동기부여
-
-JSON으로만 대답
-
-{
- "title":"",
- "reason":"",
- "studyPlan":[
-   ""
- ],
- "estimatedTime":"",
- "motivation":""
-}
-`;
+    const summaryText =
+      summaries
+        ?.map((item) => item.content)
+        .join("\n\n-----------------\n\n") ??
+      "요약 없음";
 
     const response =
       await openai.responses.create({
         model: "gpt-5",
-        input: prompt,
+
+        input: [
+          {
+            role: "system",
+            content: `
+너는 AI 학습 코치이다.
+
+사용자의 일정과 학습 자료를 보고
+
+오늘 무엇을 공부해야 하는지 추천한다.
+
+반드시 JSON만 반환한다.
+
+{
+"title":"",
+"reason":"",
+"priority":"",
+"estimatedTime":"",
+"studyPlan":[
+""
+],
+"motivation":""
+}
+`,
+          },
+
+          {
+            role: "user",
+            content: `
+다가오는 일정
+
+${JSON.stringify(events, null, 2)}
+
+최근 AI 요약
+
+${summaryText}
+`,
+          },
+        ],
       });
 
     return NextResponse.json(

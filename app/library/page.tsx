@@ -1,7 +1,8 @@
 "use client";
 
-import MaterialExtractButton from "@/components/MaterialExtractButton";
 import Link from "next/link";
+
+import MaterialExtractButton from "@/components/MaterialExtractButton";
 import {
   useCallback,
   useEffect,
@@ -456,7 +457,7 @@ export default function LibraryPage() {
 
       const matchesStatus =
         selectedStatus === "전체" ||
-        (selectedStatus === "요약 완료" &&
+        (selectedStatus === "분석 완료" &&
           item.hasSummary) ||
         (selectedStatus === "텍스트 추출 완료" &&
           item.extractedTextLength > 0 &&
@@ -646,7 +647,7 @@ export default function LibraryPage() {
     item: LibraryItem,
   ) {
     const shouldDelete = window.confirm(
-      `"${item.original_name}" 자료를 삭제할까요?\n텍스트 추출 결과와 AI 요약도 함께 삭제될 수 있어요.`,
+      `"${item.original_name}" 자료를 삭제할까요?\n텍스트 추출 결과와 AI 문서 분석도 함께 삭제될 수 있어요.`,
     );
 
     if (!shouldDelete) {
@@ -788,7 +789,7 @@ export default function LibraryPage() {
 
         <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-bold text-slate-400">
-            AI 요약
+            AI 문서 분석
           </p>
 
           <p className="mt-3 text-3xl font-extrabold text-emerald-600">
@@ -796,7 +797,7 @@ export default function LibraryPage() {
           </p>
 
           <p className="mt-1 text-xs text-slate-400">
-            저장된 요약 자료
+            저장된 분석 자료
           </p>
         </article>
 
@@ -884,8 +885,8 @@ export default function LibraryPage() {
               모든 학습 상태
             </option>
 
-            <option value="요약 완료">
-              요약 완료
+            <option value="분석 완료">
+              분석 완료
             </option>
 
             <option value="텍스트 추출 완료">
@@ -971,7 +972,7 @@ export default function LibraryPage() {
 
                           {item.hasSummary && (
                             <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-                              AI 요약 완료
+                              AI 문서 분석 완료
                             </span>
                           )}
                         </div>
@@ -1195,7 +1196,7 @@ export default function LibraryPage() {
                         </div>
 
                         <p className="mt-2 text-xs text-slate-400">
-                          AI 요약{" "}
+                          AI 문서 분석{" "}
                           {subject.summaryCount}/
                           {subject.count}
                         </p>
@@ -1221,7 +1222,7 @@ export default function LibraryPage() {
             </h2>
 
             <p className="mt-3 text-sm leading-7 text-slate-300">
-              PDF 텍스트를 추출하고 AI 요약을
+              PDF 텍스트를 추출하고 AI 문서 분석을
               만들면 이후 퀴즈, 암기카드,
               오답노트로 연결할 수 있어요.
             </p>
